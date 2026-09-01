@@ -1,0 +1,29 @@
+{
+  "name": "@synclyft/lib",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./api": "./src/api/api.ts",
+    "./types": "./src/api/types.ts",
+    "./store/auth": "./src/store/auth.ts",
+    "./store/interview": "./src/store/interview.ts",
+    "./theme": "./src/theme.tsx",
+    "./utils": "./src/utils.ts"
+  },
+  "dependencies": {
+    "axios": "^1.18.1",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^3.6.0",
+    "zustand": "^5.0.14"
+  },
+  "peerDependencies": {
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@types/react": "^19",
+    "typescript": "^5"
+  }
+}

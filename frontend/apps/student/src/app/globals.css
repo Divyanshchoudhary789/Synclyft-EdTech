@@ -1,0 +1,3 @@
+/* Synclyft design system lives in @synclyft/ui — imported here so every app
+   shares one visual language. App-specific overrides can be added below. */
+@import "@synclyft/ui/styles/globals.css";
