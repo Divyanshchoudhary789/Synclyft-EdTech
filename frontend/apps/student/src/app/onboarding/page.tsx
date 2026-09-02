@@ -11,6 +11,7 @@ import { Upload, Check, Link as LinkIcon, ArrowRight, Plus, X, Copy } from "luci
 import { Logo } from "@synclyft/ui/components/Logo";
 import { Button } from "@synclyft/ui/components/Button";
 import { api } from "@synclyft/lib/api";
+import { isPdfFile } from "@synclyft/lib/utils";
 import { useAuthStore } from "@synclyft/lib/store/auth";
 import { useStudentProfile } from "@synclyft/lib/api/hooks";
 
@@ -187,8 +188,8 @@ export default function OnboardingPage() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.type !== "application/pdf") return toast("Please select a PDF file.");
-    if (file.size > 3 * 1024 * 1024) return toast("File must be under 3 MB.");
+    if (!isPdfFile(file)) return toast("Please select a PDF file.");
+    if (file.size > 5 * 1024 * 1024) return toast("File must be under 5 MB.");
     setUploadedFile(file);
   };
 
@@ -395,7 +396,7 @@ export default function OnboardingPage() {
                 ) : (
                   <>
                     <p className="text-sm" style={{ color: "var(--th-text-primary)" }}>Click to upload your resume</p>
-                    <p className="mt-1 text-xs" style={{ color: "var(--th-text-muted)" }}>PDF only · max 3 MB</p>
+                    <p className="mt-1 text-xs" style={{ color: "var(--th-text-muted)" }}>PDF only · max 5 MB</p>
                   </>
                 )}
               </button>

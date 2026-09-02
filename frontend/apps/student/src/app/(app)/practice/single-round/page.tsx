@@ -73,9 +73,9 @@ export default function SingleRoundPracticePage() {
   };
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: "var(--th-bg)", color: "var(--th-text-primary)", fontFamily: "var(--font-inter), sans-serif" }}>
+    <div style={{ fontFamily: "var(--font-inter), sans-serif" }}>
 
-      <div className="mx-auto max-w-3xl space-y-8">
+      <div className="mx-auto max-w-3xl space-y-6 sm:space-y-8">
         <div>
           <div
             className="flex items-center gap-2 mb-1"
@@ -88,7 +88,7 @@ export default function SingleRoundPracticePage() {
           </div>
 
           <h1
-            className="text-[2rem] font-medium tracking-tight"
+            className="text-2xl sm:text-[2rem] font-medium tracking-tight"
             style={{
               fontFamily: "var(--font-inter-tight), sans-serif",
               color: "var(--th-text-primary)",

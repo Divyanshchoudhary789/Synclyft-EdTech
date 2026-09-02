@@ -95,10 +95,10 @@ export default function DashboardPage() {
   return (
     <div className="space-y-7">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4 flex-wrap pb-4 border-b border-dashed" style={{ borderColor: "var(--th-border)" }}>
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pb-4 border-b border-dashed" style={{ borderColor: "var(--th-border)" }}>
         <div>
           <p className="label-caption mb-1" style={{ color: "var(--th-text-faint)" }}>Student portal</p>
-          <h1 className="text-[2rem] font-semibold tracking-tight" style={{ fontFamily: "var(--font-display)", color: "var(--th-text-primary)" }}>
+          <h1 className="text-[1.6rem] sm:text-[2rem] font-semibold tracking-tight" style={{ fontFamily: "var(--font-display)", color: "var(--th-text-primary)" }}>
             {greeting()}{user?.name ? `, ${user.name.split(" ")[0]}` : ""}
           </h1>
           <p className="text-xs flex items-center gap-2 mt-1 flex-wrap" style={{ color: "var(--th-text-muted)" }}>
@@ -106,9 +106,9 @@ export default function DashboardPage() {
             {profile?.branch && <><span className="w-1.5 h-1.5 rounded-full bg-blue-500" /><span>{profile.branch}{profile.graduationYear ? ` · ${profile.graduationYear}` : ""}</span></>}
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <Link href="/interview/setup"><Button icon={<Play size={14} />} data-testid="dashboard-start-interview">New interview</Button></Link>
-          <Link href="/resume"><Button variant="secondary">Resume analyzer</Button></Link>
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          <Link href="/interview/setup" className="flex-1 sm:flex-none"><Button className="w-full sm:w-auto justify-center" icon={<Play size={14} />} data-testid="dashboard-start-interview">New interview</Button></Link>
+          <Link href="/resume" className="flex-1 sm:flex-none"><Button className="w-full sm:w-auto justify-center" variant="secondary">Resume analyzer</Button></Link>
         </div>
       </div>
 
@@ -174,12 +174,12 @@ export default function DashboardPage() {
       )}
 
       {/* Row 1 — readiness hero + competency radar */}
-      <div className="grid gap-6 lg:grid-cols-5">
+      <div className="grid gap-4 sm:gap-6 lg:grid-cols-5">
         {isLoading ? <SkeletonCard className="h-72 lg:col-span-2" /> : (
           <div className="lg:col-span-2 rounded-2xl border p-6 flex flex-col" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
             <p className="label-caption" style={{ color: "var(--th-text-faint)" }}>Placement readiness</p>
             <div className="mt-3 flex items-end gap-3">
-              <span className="text-6xl font-black leading-none" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: gradeColor }}>{readiness}</span>
+              <span className="text-5xl sm:text-6xl font-bold leading-none" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: gradeColor }}>{readiness}</span>
               <span className="text-sm mb-2" style={{ color: "var(--th-text-faint)" }}>/ 100</span>
             </div>
             <Badge variant={band === "high" ? "verdant" : band === "mid" ? "amber" : "coral"}>
@@ -233,7 +233,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Row 2 — score trend + last-session round breakdown */}
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
         {isLoading ? <SkeletonCard className="h-64 lg:col-span-2" /> : (
           <div className="lg:col-span-2 rounded-2xl border p-6" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
             <div className="flex items-center justify-between mb-3">
@@ -290,7 +290,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Row 3 — recent interviews + shortcuts */}
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
         {isLoading ? <SkeletonCard className="h-64 lg:col-span-2" /> : (
           <div className="lg:col-span-2 rounded-2xl border p-6 flex flex-col" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
             <div className="flex items-center justify-between mb-4">

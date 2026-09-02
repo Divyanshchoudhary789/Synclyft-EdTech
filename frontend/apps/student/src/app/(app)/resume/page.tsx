@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import { Badge } from "@synclyft/ui/components/Badge";
 import { Button } from "@synclyft/ui/components/Button";
-import { getGradeBand, getGradeColor } from "@synclyft/lib/utils";
+import { getGradeBand, getGradeColor, isPdfFile } from "@synclyft/lib/utils";
 import { resumeService } from "@synclyft/lib/api/services";
 import { toApiError } from "@synclyft/lib/api";
 import type { ResumeAnalysis } from "@synclyft/lib/api/models";
@@ -50,7 +50,7 @@ export default function ResumeAnalyzerPage() {
 
   const pickFile = useCallback((f: File | undefined | null) => {
     if (!f) return;
-    if (f.type !== "application/pdf") return toast.error("Please upload a PDF");
+    if (!isPdfFile(f)) return toast.error("Please upload a PDF file");
     if (f.size > 5 * 1024 * 1024) return toast.error("PDF must be under 5MB");
     setFile(f);
     setView("form");
@@ -84,7 +84,7 @@ export default function ResumeAnalyzerPage() {
         <div className="mb-8 flex items-start justify-between gap-4 flex-wrap">
           <div>
             <p className="label-caption mb-1" style={{ color: "var(--th-text-faint)" }}>Resume tools</p>
-            <h1 className="text-[2rem] font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
+            <h1 className="text-[1.65rem] sm:text-[2rem] font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
               ATS resume analyzer
             </h1>
             <p className="text-sm mt-0.5" style={{ color: "var(--th-text-faint)" }}>

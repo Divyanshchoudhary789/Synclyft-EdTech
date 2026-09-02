@@ -37,7 +37,7 @@ interface ReportCard {
   strengths?: string[];
   weaknesses?: string[];
   skillGapsVsJd?: string[];
-  actionableStudyPlan?: (string | { title?: string; description?: string })[];
+  actionableStudyPlan?: (string | { title?: string; description?: string; topic?: string; focusArea?: string; recommendedAction?: string; priority?: string })[];
   overallGrade?: string;
 }
 
@@ -97,12 +97,12 @@ function InterviewReportInner() {
     : (a?.roundAnalytics ?? []).map((r) => ({ subject: ROUND_LABEL[r.roundType] ?? r.roundType, score: Math.round(r.totalScore ?? 0), fullMark: 100 }));
 
   return (
-    <div className="min-h-screen pb-20" style={{ backgroundColor: "var(--th-bg)", fontFamily: "var(--font-inter), sans-serif" }}>
+    <div style={{ fontFamily: "var(--font-inter), sans-serif" }}>
       <div className="mx-auto max-w-5xl space-y-6">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
             <p className="label-caption mb-1" style={{ color: "var(--th-text-faint)" }}>Interview report</p>
-            <h1 className="text-[2rem] font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
+            <h1 className="text-[1.65rem] sm:text-[2rem] font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
               {insights?.session?.targetRole || "Your results"}
             </h1>
           </div>
@@ -137,12 +137,17 @@ function InterviewReportInner() {
 
             <div className="grid gap-6 md:grid-cols-3">
               {/* Score */}
-              <div className="rounded-2xl border p-6 flex flex-col items-center justify-center text-center" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
-                <div className="text-5xl font-black" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color }}>
+              <div className="rounded-2xl border p-6 flex flex-col items-center justify-center text-center gap-2" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
+                <div className="text-5xl font-bold" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color }}>
                   <CountUp end={score} />
                 </div>
-                <p className="text-[10px] font-bold tracking-wider mt-1" style={{ color: "var(--th-text-faint)" }}>COMPOSITE / 100</p>
+                <p className="text-[10px] font-bold tracking-wider" style={{ color: "var(--th-text-faint)" }}>COMPOSITE / 100</p>
                 <Badge variant={band === "high" ? "verdant" : band === "mid" ? "amber" : "coral"}>Grade {grade}</Badge>
+                {typeof a?.proctoringRiskScore === "number" && a.proctoringRiskScore > 0 && (
+                  <span className="text-[10px] font-semibold flex items-center gap-1" style={{ color: a.proctoringRiskScore >= 60 ? "#FF5C5C" : a.proctoringRiskScore >= 25 ? "#F59E0B" : "var(--th-text-faint)" }}>
+                    <ShieldAlert size={10} /> Integrity risk {Math.round(a.proctoringRiskScore)}
+                  </span>
+                )}
               </div>
 
               {/* Radar */}
@@ -165,15 +170,19 @@ function InterviewReportInner() {
 
             {a?.roundAnalytics && a.roundAnalytics.length > 0 && (
               <div className="rounded-2xl border overflow-hidden" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
-                <div className="grid grid-cols-4 px-6 py-3 text-[10px] font-bold uppercase tracking-wider border-b" style={{ borderColor: "var(--th-border)", color: "var(--th-text-faint)" }}>
+                <div className="hidden sm:grid grid-cols-4 px-6 py-3 text-[10px] font-bold uppercase tracking-wider border-b" style={{ borderColor: "var(--th-border)", color: "var(--th-text-faint)" }}>
                   <span>Round</span><span>Score</span><span>Questions</span><span>Time</span>
                 </div>
                 {a.roundAnalytics.map((r) => (
-                  <div key={r.roundType} className="grid grid-cols-4 px-6 py-3 text-sm border-b last:border-0" style={{ borderColor: "var(--th-border)", color: "var(--th-text-secondary)" }}>
+                  <div key={r.roundType} className="px-4 sm:px-6 py-3 text-sm border-b last:border-0 flex items-center justify-between gap-3 sm:grid sm:grid-cols-4" style={{ borderColor: "var(--th-border)", color: "var(--th-text-secondary)" }}>
                     <span className="font-medium" style={{ color: "var(--th-text-primary)" }}>{ROUND_LABEL[r.roundType] ?? r.roundType}</span>
-                    <span className="font-mono">{Math.round(r.totalScore ?? 0)}</span>
-                    <span className="font-mono">{r.questionsAttempted ?? 0}</span>
-                    <span className="font-mono">{Math.round((r.timeSpentSeconds ?? 0) / 60)}m</span>
+                    <span className="font-mono flex gap-3 sm:contents">
+                      <span title="Score">{Math.round(r.totalScore ?? 0)}</span>
+                      <span className="text-[color:var(--th-text-faint)] sm:hidden">·</span>
+                      <span title="Questions">{r.questionsAttempted ?? 0}q</span>
+                      <span className="text-[color:var(--th-text-faint)] sm:hidden">·</span>
+                      <span title="Time">{Math.round((r.timeSpentSeconds ?? 0) / 60)}m</span>
+                    </span>
                   </div>
                 ))}
               </div>
@@ -216,8 +225,16 @@ function InterviewReportInner() {
                 </h3>
                 <ul className="space-y-2">
                   {report.actionableStudyPlan.map((s, i) => {
-                    const text = typeof s === "string" ? s : `${s.title ?? ""}${s.description ? " — " + s.description : ""}`;
-                    return <li key={i} className="text-xs flex gap-2" style={{ color: "var(--th-text-secondary)" }}><ArrowRight size={12} className="mt-0.5 shrink-0 text-blue-500" />{text}</li>;
+                    const text = typeof s === "string"
+                      ? s
+                      : [s.title ?? s.topic, s.focusArea, s.recommendedAction ?? s.description].filter(Boolean).join(" — ");
+                    const pri = typeof s === "object" ? s.priority : undefined;
+                    return (
+                      <li key={i} className="text-xs flex gap-2" style={{ color: "var(--th-text-secondary)" }}>
+                        <ArrowRight size={12} className="mt-0.5 shrink-0 text-blue-500" />
+                        <span>{text}{pri ? <span className="ml-1.5 text-[10px] uppercase font-bold" style={{ color: "var(--th-text-faint)" }}>· {pri}</span> : null}</span>
+                      </li>
+                    );
                   })}
                 </ul>
               </div>

@@ -149,11 +149,8 @@ export default function AptitudeRoundPage() {
       else await loadQuestion(nextPage, batchSessionId);
     } catch (err) {
       const e = toApiError(err);
-      if ((e as { code?: string }).code === "ROUND_TIME_UP") {
-        setPhase("done");
-      } else {
-        toast.error(e.message);
-      }
+      if (e.code === "ROUND_TIME_UP") setPhase("done");
+      else toast.error(e.message);
     } finally {
       setSubmitting(false);
     }

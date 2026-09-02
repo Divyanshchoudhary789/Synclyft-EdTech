@@ -7,6 +7,8 @@ const authorizeRoles = require("../middlewares/authorizeRoles.js");
 const uploadImage = require("../middlewares/uploadImage.js");
 const uploadValidation = require("../middlewares/uploadValidation.js");
 const uploadResume = require("../middlewares/uploadResume.js");
+const validateResumeUpload = require("../middlewares/validateResumeUpload.js");
+const { handleUploadErrors } = require("../middlewares/handleUploadErrors.js");
 const { asyncHandler } = require("../utils/errorHandler.js");
 const { validate } = require("../middlewares/validationMiddleware.js");
 const { reportSchemas, studentProfileSchemas, codingProfileSchemas } = require("../utils/validationSchemas.js");
@@ -38,9 +40,9 @@ studentProfileRouter.get('/reports/summary', ...seatQuotaGate, validate(reportSc
 studentProfileRouter.get('/reports/download', ...seatQuotaGate, validate(reportSchemas.downloadQuery, 'query'), asyncHandler(downloadMyPerformanceReport));
 
 studentProfileRouter.get("/get-profile", getProfileDetails);
-studentProfileRouter.post("/add/profile-details", uploadResume.single("resume"), uploadValidation, addProfileDetails);
-studentProfileRouter.put("/update/profile-picture", uploadImage.single("image"), uploadValidation, updateProfilePicture);
-studentProfileRouter.put("/update/profile", uploadResume.single("resume"), updateProfileDetails);
+studentProfileRouter.post("/add/profile-details", uploadResume.single("resume"), handleUploadErrors, validateResumeUpload(true), addProfileDetails);
+studentProfileRouter.put("/update/profile-picture", uploadImage.single("image"), handleUploadErrors, uploadValidation, updateProfilePicture);
+studentProfileRouter.put("/update/profile", uploadResume.single("resume"), handleUploadErrors, validateResumeUpload(false), updateProfileDetails);
 
 
 studentProfileRouter.post("/initiate", validate(codingProfileSchemas.initiateVerification, 'body'), initiateVerification);

@@ -183,18 +183,18 @@ export default function SettingsPage() {
   );
 
   return (
-    <div className="min-h-screen pb-20" style={{ backgroundColor: "var(--th-bg)", fontFamily: "var(--font-inter), sans-serif" }}>
+    <div style={{ fontFamily: "var(--font-inter), sans-serif" }}>
       <div>
-        <div className="flex items-center gap-2 mb-8 pb-4 border-b border-dashed" style={{ borderColor: "var(--th-border)" }}>
+        <div className="flex items-center gap-2 mb-6 sm:mb-8 pb-4 border-b border-dashed" style={{ borderColor: "var(--th-border)" }}>
           <div className="p-2 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400"><SettingsIcon size={22} /></div>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight" style={{ color: "var(--th-text-primary)" }}>Account settings</h1>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight" style={{ color: "var(--th-text-primary)" }}>Account settings</h1>
             <p className="text-xs" style={{ color: "var(--th-text-faint)" }}>Profile, connected platforms and preferences</p>
           </div>
         </div>
 
-        <div className="grid md:grid-cols-12 gap-6 items-start">
-          <div className="md:col-span-3 space-y-1.5">
+        <div className="grid md:grid-cols-12 gap-4 md:gap-6 items-start">
+          <div className="md:col-span-3 flex md:flex-col gap-1.5 overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0 md:overflow-visible">
             {([
               ["profile", "Profile", User],
               ["education", "Academics", GraduationCap],
@@ -203,17 +203,18 @@ export default function SettingsPage() {
               ["security", "Security", Shield],
             ] as const).map(([id, label, Icon]) => (
               <button key={id} type="button" onClick={() => setTab(id)}
-                className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-left text-xs font-semibold transition-all"
+                className="shrink-0 md:w-full flex items-center gap-2 md:gap-3 px-3.5 md:px-4 py-2 md:py-2.5 rounded-xl text-left text-xs font-semibold transition-all whitespace-nowrap border md:border-0"
                 style={{
                   backgroundColor: tab === id ? "rgba(0,98,255,0.08)" : "transparent",
                   color: tab === id ? "#0062FF" : "var(--th-text-secondary)",
+                  borderColor: tab === id ? "rgba(0,98,255,0.25)" : "var(--th-card-border)",
                 }}>
                 <Icon size={15} /> {label}
               </button>
             ))}
           </div>
 
-          <div className="md:col-span-9">
+          <div className="md:col-span-9 min-w-0">
             {/* PROFILE */}
             {tab === "profile" && (
               <div

@@ -1,19 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Button } from "@synclyft/ui/components/Button";
 import {
-  Brain, Code2, Mic2, Users, Check, Link as LinkIcon,
-  FileText, Upload, ChevronRight, AlertCircle, Wifi, Camera, Cpu,
+  Brain, Code2, Mic2, Check, Link as LinkIcon,
+  FileText, Upload, ChevronRight, AlertCircle, Wifi, Camera, Cpu, PlayCircle,
+  FileCheck2, ExternalLink, RefreshCw,
 } from "lucide-react";
-import { cn } from "@synclyft/lib/utils";
+import { cn, isPdfFile } from "@synclyft/lib/utils";
 import { useRouter } from "next/navigation";
 import { interviewService } from "@synclyft/lib/api/services";
 import { toApiError } from "@synclyft/lib/api";
+import { useStudentProfile } from "@synclyft/lib/api/hooks";
 import toast from "react-hot-toast";
 
 const CODING_LANGUAGES = ["python", "javascript", "java", "cpp", "c", "typescript", "go"];
+const MAX_RESUME_BYTES = 5 * 1024 * 1024;
 
 const ROUNDS = [
   { id: "aptitude", label: "Aptitude", icon: Brain, desc: "MCQ: Quantitative, Logical, Verbal, CS Fundamentals", duration: "30 min" },
@@ -31,18 +34,37 @@ interface PreflightItem {
   status: CheckStatus;
 }
 
-const JD_TABS = ["Link", "Text", "Upload"] as const;
+const JD_TABS = ["Text", "Link"] as const;
 type JDTab = typeof JD_TABS[number];
 
 export default function InterviewSetupPage() {
+  const { data: profile, isLoading: profileLoading } = useStudentProfile();
+  const savedResumeUrl = profile?.resumeUrl ?? "";
+
   const [selectedRounds, setSelectedRounds] = useState<string[]>(["aptitude", "coding", "technical", "hr"]);
   const [jdTab, setJdTab] = useState<JDTab>("Text");
   const [jdText, setJdText] = useState("");
   const [jdLink, setJdLink] = useState("");
   const [targetRole, setTargetRole] = useState("");
   const [codingLanguage, setCodingLanguage] = useState("python");
-  const [jdFile, setJdFile] = useState<File | null>(null);
+  const [resumeMode, setResumeMode] = useState<"saved" | "new">("new");
+  const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [creating, setCreating] = useState(false);
+
+  // Default to the saved resume once the profile loads.
+  useEffect(() => {
+    if (!profileLoading) setResumeMode(savedResumeUrl ? "saved" : "new");
+  }, [profileLoading, savedResumeUrl]);
+
+  const needsResume = selectedRounds.includes("coding") || selectedRounds.includes("technical");
+
+  const pickResume = (f: File | null | undefined) => {
+    if (!f) return;
+    if (!isPdfFile(f)) { toast.error("Resume must be a PDF file"); return; }
+    if (f.size > MAX_RESUME_BYTES) { toast.error("Resume must be under 5 MB"); return; }
+    setResumeFile(f);
+    setResumeMode("new");
+  };
   const [preflightDone, setPreflightDone] = useState(false);
   const [preflight, setPreflight] = useState<PreflightItem[]>([
     { id: "camera", label: "Camera access", icon: Camera, status: "pending" },
@@ -50,6 +72,29 @@ export default function InterviewSetupPage() {
     { id: "network", label: "Network quality", icon: Wifi, status: "pending" },
     { id: "browser", label: "Browser compatibility", icon: Cpu, status: "pending" },
   ]);
+  const [resumable, setResumable] = useState<{ sessionId: string; round: string; role: string } | null>(null);
+
+  // Detect an interview that was left in progress (refresh / closed tab).
+  useEffect(() => {
+    let sid = "";
+    try { sid = sessionStorage.getItem("interview:sessionId") ?? ""; } catch { /* */ }
+    if (!sid) return;
+    interviewService
+      .state(sid)
+      .then((s) => {
+        if (s.status === "ongoing" && s.activeRound) {
+          setResumable({ sessionId: sid, round: s.activeRound, role: s.targetRole });
+        }
+      })
+      .catch(() => {
+        try { sessionStorage.removeItem("interview:sessionId"); } catch { /* */ }
+      });
+  }, []);
+
+  const ROUND_ROUTE: Record<string, string> = {
+    aptitude: "/interview/aptitude", coding: "/interview/coding",
+    technical: "/interview/technical", hr: "/interview/hr",
+  };
 
   const toggleRound = (id: string) => {
     setSelectedRounds((prev) =>
@@ -249,6 +294,12 @@ export default function InterviewSetupPage() {
     const description = jdText.trim() || (jdLink.trim() ? `Job posting: ${jdLink.trim()}` : "");
     if (!description) return toast.error("Add a job description (text or link)");
 
+    // Resume is required for coding / technical rounds.
+    if (needsResume) {
+      if (resumeMode === "new" && !resumeFile) return toast.error("Upload your resume PDF for the coding / technical rounds");
+      if (resumeMode === "saved" && !savedResumeUrl) return toast.error("You have no saved resume — upload one below");
+    }
+
     const passed = await runPreflight();
     if (!passed) {
       toast.error("Please allow the required permissions before starting.");
@@ -270,7 +321,7 @@ export default function InterviewSetupPage() {
       // Backend validates this as a JSON string (or array) — send JSON.
       const order = ["aptitude", "coding", "technical", "hr"].filter((r) => selectedRounds.includes(r));
       fd.append("selectedRounds", JSON.stringify(order));
-      if (jdFile) fd.append("resume", jdFile);
+      if (resumeMode === "new" && resumeFile) fd.append("resume", resumeFile);
 
       const res = (await interviewService.initialize(fd)) as { sessionId?: string; _id?: string };
       const sessionId = res.sessionId ?? res._id;
@@ -292,16 +343,43 @@ export default function InterviewSetupPage() {
   };
 
   return (
-    <div className="min-h-screen bg-(--th-bg)" style={{ fontFamily: "var(--font-inter), sans-serif" }}>
+    <div style={{ fontFamily: "var(--font-inter), sans-serif" }}>
 
       <div className="mx-auto max-w-3xl space-y-8">
         <div>
           <p className="label-caption mb-1" style={{ color: "var(--th-text-secondary)" }}>Mock Interview</p>
-          <h1 className="text-[2rem] font-medium tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
+          <h1 className="text-[1.65rem] sm:text-[2rem] font-medium tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
             Configure your session
           </h1>
           <p className="text-(--th-text-faint) text-sm mt-0.5">Set your target role, select rounds, and run the pre-flight check before entering.</p>
         </div>
+
+        {resumable && (
+          <div className="rounded-xl border p-4 flex flex-col sm:flex-row sm:items-center gap-3"
+            style={{ borderColor: "var(--th-primary)", backgroundColor: "color-mix(in srgb, var(--th-primary) 8%, transparent)" }}>
+            <PlayCircle size={18} style={{ color: "var(--th-primary)" }} className="shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold" style={{ color: "var(--th-text-primary)" }}>You have an interview in progress</p>
+              <p className="text-xs" style={{ color: "var(--th-text-muted)" }}>
+                {resumable.role ? `${resumable.role} · ` : ""}currently on the {resumable.round} round
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" iconRight={<ChevronRight size={14} />}
+                onClick={() => router.push(ROUND_ROUTE[resumable.round] ?? "/interview/aptitude")}>
+                Resume
+              </Button>
+              <Button size="sm" variant="secondary"
+                onClick={async () => {
+                  try { await interviewService.terminate(resumable.sessionId); } catch { /* */ }
+                  try { sessionStorage.removeItem("interview:sessionId"); sessionStorage.removeItem("interview:rounds"); } catch { /* */ }
+                  setResumable(null);
+                }}>
+                Discard
+              </Button>
+            </div>
+          </div>
+        )}
 
         {/* Role & language */}
         <div className="card-light p-6 space-y-4" style={{
@@ -334,69 +412,138 @@ export default function InterviewSetupPage() {
           backgroundColor: "var(--th-card-bg)",
           border: "1px solid var(--th-card-border)", color: "var(--th-text-secondary)"
         }}>
-          <h2 className="font-semibold text-sm" style={{ fontFamily: "var(--font-inter-tight), sans-serif" }}>
-            Job description
-          </h2>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="font-semibold text-sm" style={{ fontFamily: "var(--font-inter-tight), sans-serif" }}>
+              Job description
+            </h2>
+            <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: "var(--th-primary)" }}>Required</span>
+          </div>
 
           {/* JD Tabs */}
-          <div className="flex gap-1 p-0.5 rounded-sm w-fit">
+          <div className="inline-flex rounded-lg border p-0.5" style={{ borderColor: "var(--th-border)" }}>
             {JD_TABS.map((tab) => (
               <button
                 key={tab}
                 onClick={() => setJdTab(tab)}
-                className={cn(
-                  "px-4 py-1.5 rounded text-xs font-medium transition-all",
-                  jdTab === tab
-                    ? "bg-(--th-bg) text-(--th-text-secondary) shadow-sm"
-                    : "text-(--th-text-secondary) hover:text-(--th-text-primary)"
-                )}
+                className="px-4 py-1.5 rounded text-xs font-semibold transition-colors"
+                style={{
+                  backgroundColor: jdTab === tab ? "var(--th-primary)" : "transparent",
+                  color: jdTab === tab ? "#fff" : "var(--th-text-secondary)",
+                }}
               >
-                {tab}
+                {tab === "Text" ? "Paste text" : "Job link"}
               </button>
             ))}
           </div>
 
           {jdTab === "Text" && (
-            <textarea
-              value={jdText}
-              onChange={(e) => setJdText(e.target.value)}
-              className="input-light h-32 resize-none"
-              placeholder="Paste the job description here..."
-              data-testid="jd-text-input"
-              style={{
-                backgroundColor: "var(--th-card-bg)",
-                border: "1px solid var(--th-card-border)", color: "var(--th-text-secondary)"
-              }}
-            />
+            <>
+              <textarea
+                value={jdText}
+                onChange={(e) => setJdText(e.target.value.slice(0, 20000))}
+                rows={6}
+                className="w-full px-3 py-2 rounded-lg border text-sm resize-y"
+                placeholder="Paste the full job description — responsibilities, required skills, tech stack…"
+                data-testid="jd-text-input"
+                style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }}
+              />
+              <p className="text-[11px]" style={{ color: "var(--th-text-faint)" }}>{jdText.length.toLocaleString()} / 20,000 characters</p>
+            </>
           )}
           {jdTab === "Link" && (
-            <div className="flex gap-2">
-              <input
-                value={jdLink}
-                onChange={(e) => setJdLink(e.target.value)}
-                className="input-light flex-1 "
-                placeholder="https://jobs.example.com/sde-2"
-                data-testid="jd-link-input"
-                style={{
-                  backgroundColor: "var(--th-card-bg)",
-                  border: "1px solid var(--th-card-border)", color: "var(--th-text-secondary)"
-                }}
-              />
-              <Button variant="secondary" size="sm" icon={<LinkIcon size={12} />}>Fetch</Button>
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 rounded-lg border px-3 py-2" style={{ borderColor: "var(--th-border-strong)", backgroundColor: "var(--th-input-bg)" }}>
+                <LinkIcon size={13} style={{ color: "var(--th-text-faint)" }} className="shrink-0" />
+                <input
+                  value={jdLink}
+                  onChange={(e) => setJdLink(e.target.value)}
+                  className="flex-1 bg-transparent text-sm outline-none"
+                  placeholder="https://jobs.example.com/sde-2"
+                  data-testid="jd-link-input"
+                  style={{ color: "var(--th-text-primary)" }}
+                />
+              </div>
+              <p className="text-[11px]" style={{ color: "var(--th-text-faint)" }}>Pasting the full text gives sharper, more relevant questions.</p>
             </div>
           )}
-          {jdTab === "Upload" && (
-            <label className="block border-2 border-dashed border-[#D4D0C5] rounded-[8px] p-8 text-center cursor-pointer hover:border-[#0062FF] transition-colors">
-              <input type="file" accept="application/pdf" className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f && f.type !== "application/pdf") return;
-                  setJdFile(f ?? null);
-                }} />
-              <Upload size={20} className="text-[#9CA3AF] mx-auto mb-2" />
-              <p className="text-sm text-[#6B7280]">{jdFile ? jdFile.name : "Attach an updated resume PDF (optional)"}</p>
-              <p className="text-xs text-[#9CA3AF] mt-1">We&apos;ll use your profile resume otherwise · PDF only</p>
-            </label>
+        </div>
+
+        {/* Resume */}
+        <div className="card-light p-6 space-y-4" style={{
+          backgroundColor: "var(--th-card-bg)", border: "1px solid var(--th-card-border)", color: "var(--th-text-secondary)"
+        }}>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="font-semibold text-sm" style={{ fontFamily: "var(--font-inter-tight), sans-serif" }}>Resume</h2>
+            {needsResume
+              ? <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: "var(--th-primary)" }}>Required</span>
+              : <span className="text-[10px]" style={{ color: "var(--th-text-faint)" }}>Optional for this round mix</span>}
+          </div>
+          <p className="text-xs" style={{ color: "var(--th-text-faint)" }}>
+            The coding &amp; technical rounds build questions from your resume. It&apos;s saved to your profile for next time.
+          </p>
+
+          {profileLoading ? (
+            <div className="h-16 rounded-lg animate-pulse" style={{ backgroundColor: "var(--th-bg-secondary)" }} />
+          ) : (
+            <div className="space-y-2.5">
+              {savedResumeUrl && (
+                <label className={cn(
+                  "flex items-center gap-3 rounded-lg border p-3 cursor-pointer transition-colors",
+                  resumeMode === "saved" ? "border-[color:var(--th-primary)]" : "border-[color:var(--th-card-border)]"
+                )}>
+                  <input type="radio" name="resume" checked={resumeMode === "saved"} onChange={() => setResumeMode("saved")} className="accent-[color:var(--th-primary)]" />
+                  <FileCheck2 size={16} className="text-emerald-500 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold" style={{ color: "var(--th-text-primary)" }}>Use your saved resume</p>
+                    <a href={savedResumeUrl} target="_blank" rel="noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-[11px] inline-flex items-center gap-1 hover:underline" style={{ color: "var(--th-primary)" }}>
+                      View current resume <ExternalLink size={9} />
+                    </a>
+                  </div>
+                </label>
+              )}
+
+              <label className={cn(
+                "flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors",
+                resumeMode === "new" ? "border-[color:var(--th-primary)]" : "border-[color:var(--th-card-border)]"
+              )}>
+                <input type="radio" name="resume" checked={resumeMode === "new"} onChange={() => setResumeMode("new")} className="mt-0.5 accent-[color:var(--th-primary)]" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold" style={{ color: "var(--th-text-primary)" }}>
+                    {savedResumeUrl ? "Upload a different resume" : "Upload your resume"}
+                  </p>
+                  <div
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => { e.preventDefault(); pickResume(e.dataTransfer.files?.[0]); }}
+                    className="mt-2 flex items-center gap-3 rounded-lg border border-dashed p-3"
+                    style={{ borderColor: "var(--th-border-strong)" }}>
+                    <input id="resume-input" type="file" accept="application/pdf" className="hidden"
+                      onChange={(e) => pickResume(e.target.files?.[0])} />
+                    {resumeFile ? (
+                      <>
+                        <FileText size={16} className="shrink-0" style={{ color: "var(--th-primary)" }} />
+                        <span className="text-[11px] flex-1 truncate" style={{ color: "var(--th-text-primary)" }}>{resumeFile.name}</span>
+                        <label htmlFor="resume-input" className="text-[11px] font-semibold cursor-pointer inline-flex items-center gap-1" style={{ color: "var(--th-primary)" }}>
+                          <RefreshCw size={11} /> Change
+                        </label>
+                      </>
+                    ) : (
+                      <label htmlFor="resume-input" className="flex items-center gap-2 cursor-pointer w-full">
+                        <Upload size={15} style={{ color: "var(--th-text-faint)" }} />
+                        <span className="text-[11px]" style={{ color: "var(--th-text-faint)" }}>Drop a PDF here or click to browse · max 5 MB</span>
+                      </label>
+                    )}
+                  </div>
+                </div>
+              </label>
+
+              {needsResume && resumeMode === "new" && !resumeFile && (
+                <p className="text-[11px] flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                  <AlertCircle size={11} /> Select a resume PDF to continue.
+                </p>
+              )}
+            </div>
           )}
         </div>
 
@@ -506,25 +653,19 @@ export default function InterviewSetupPage() {
         </div>
 
         {/* CTA */}
-        <div className="flex items-center justify-between pt-2">
-          <div
-            className="text-sm"
-            style={{ color: "var(--th-text-secondary)" }}
-          >
-            <span
-              className="font-mono"
-              style={{ color: "var(--th-primary)" }}
-            >
-              {selectedRounds.length}
-            </span>{" "}
-            rounds selected · ~{selectedRounds.length * 30} min total
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+          <div className="text-sm" style={{ color: "var(--th-text-secondary)" }}>
+            <span className="font-mono" style={{ color: "var(--th-primary)" }}>{selectedRounds.length}</span>{" "}
+            rounds selected · ~{selectedRounds.length * 25} min total
           </div>
 
           <Button
             size="lg"
+            className="w-full sm:w-auto justify-center"
             iconRight={<ChevronRight size={16} />}
             onClick={handleStartInterview}
             loading={creating}
+            disabled={needsResume && resumeMode === "new" && !resumeFile}
             data-testid="start-session-btn"
           >
             {creating ? "Creating session…" : "Enter interview"}

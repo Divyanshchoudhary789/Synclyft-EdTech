@@ -4,6 +4,8 @@ const resumeRouter = express.Router();
 const isAuthenticated = require("../middlewares/authMiddleware.js");
 const authorizeRoles = require("../middlewares/authorizeRoles.js");
 const uploadResume = require("../middlewares/uploadResume.js");
+const validateResumeUpload = require("../middlewares/validateResumeUpload.js");
+const { handleUploadErrors } = require("../middlewares/handleUploadErrors.js");
 const { validate } = require("../middlewares/validationMiddleware.js");
 const { resumeSchemas } = require("../utils/validationSchemas.js");
 
@@ -25,7 +27,7 @@ resumeRouter.use(isAuthenticated, authorizeRoles("student"));
 
 
 resumeRouter.post("/save", validate(resumeSchemas.saveResume, 'body'), saveResume);
-resumeRouter.post("/analyze", uploadResume.single("resume"), validate(resumeSchemas.analyzeResume, 'body'), analyzeResumeFile); // Resume Analyzer
+resumeRouter.post("/analyze", uploadResume.single("resume"), handleUploadErrors, validateResumeUpload(true), validate(resumeSchemas.analyzeResume, 'body'), analyzeResumeFile); // Resume Analyzer
 resumeRouter.post("/optimize-ai", validate(resumeSchemas.optimizeResume, 'body'), optimizeResumeAI); // Resume Optimizer
 resumeRouter.get("/history", getUserResumesHistory);
 resumeRouter.get("/analyses", getResumeAnalyses); // AI analysis history

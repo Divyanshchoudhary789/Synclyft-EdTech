@@ -127,18 +127,18 @@ export default function FeaturesPage() {
 
   return (
     <div 
-      className="min-h-screen pb-20 transition-all duration-500" 
-      style={{ 
+      className="min-h-screen pb-20 transition-all duration-500"
+      style={{
         ...dynamicBgStyle,
-        color: "var(--th-text-primary)", 
-        fontFamily: "var(--font-inter), sans-serif" 
+        color: "var(--th-text-primary)",
+        fontFamily: "var(--font-inter), sans-serif"
       }}
     >
       {/* Navbar */}
       <FirstNav />
 
       {/* Main Section */}
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-16 space-y-12 animate-fadeInUp">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-10 sm:pt-16 space-y-10 sm:space-y-12 animate-fadeInUp">
         {/* Title */}
         <div className="text-center max-w-2xl mx-auto space-y-4">
           <div className="flex flex-wrap items-center justify-center gap-2">
@@ -146,8 +146,8 @@ export default function FeaturesPage() {
               <Sparkles size={12} /> Platform Features
             </span>
           </div>
-          <h1 
-            className="text-[2.5rem] font-bold tracking-tight leading-none"
+          <h1
+            className="text-[1.75rem] sm:text-[2.5rem] font-bold tracking-tight leading-tight sm:leading-none"
             style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}
           >
             AI-powered preparation, built for campus placements.
@@ -158,9 +158,9 @@ export default function FeaturesPage() {
         </div>
 
         {/* Feature grid with sidebar tabs */}
-        <div className="grid md:grid-cols-12 gap-8 items-stretch pt-6">
+        <div className="grid md:grid-cols-12 gap-5 md:gap-8 items-stretch pt-4 sm:pt-6">
           {/* Tabs */}
-          <div className="md:col-span-4 space-y-2">
+          <div className="md:col-span-4 flex md:flex-col gap-2 overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0 md:overflow-visible">
             {features.map((f) => {
               const Icon = f.icon;
               const isActive = f.id === activeTab;
@@ -170,7 +170,7 @@ export default function FeaturesPage() {
                   onClick={() => setActiveTab(f.id)}
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
-                  className="w-full flex items-center gap-3.5 px-4 py-3 rounded-xl text-left text-xs font-bold transition-all border-0 cursor-pointer"
+                  className="shrink-0 md:w-full flex items-center gap-3 md:gap-3.5 px-3.5 md:px-4 py-2.5 md:py-3 rounded-xl text-left text-xs font-bold transition-all border-0 cursor-pointer whitespace-nowrap md:whitespace-normal"
                   style={{
                     backgroundColor: isActive 
                       ? (isDark ? "rgba(255, 255, 255, 0.06)" : "var(--th-bg-secondary)")

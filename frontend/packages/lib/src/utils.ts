@@ -58,3 +58,15 @@ export function formatMoney(n: number | undefined | null, currency = "INR"): str
 export function randomBetween(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
+
+/**
+ * Whether a picked File is a PDF. Browsers on some OSes report `file.type` as
+ * "" or "application/octet-stream" for perfectly valid PDFs, so fall back to
+ * the filename extension. The server verifies the actual bytes.
+ */
+export function isPdfFile(file: File): boolean {
+  const t = (file.type || "").toLowerCase();
+  if (t === "application/pdf" || t === "application/x-pdf") return true;
+  const generic = t === "" || t === "application/octet-stream" || t === "binary/octet-stream";
+  return generic && /\.pdf$/i.test(file.name || "");
+}

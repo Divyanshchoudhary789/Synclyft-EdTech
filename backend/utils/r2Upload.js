@@ -35,10 +35,14 @@ const uploadToR2 = async (file, folder = "uploads") => {
     let subFolder;
     let finalBuffer = file.buffer;
     let finalMimeType = file.mimetype;
-    let fileExtension = file.originalname.split(".").pop();
+    let fileExtension = (file.originalname || "").split(".").pop()?.toLowerCase() || "";
+
+    const looksLikePdf = Buffer.isBuffer(file.buffer)
+        && file.buffer.length > 4
+        && file.buffer.subarray(0, 5).toString("latin1") === "%PDF-";
 
     const isImage = file.mimetype.startsWith("image/");
-    const isPDF = file.mimetype === "application/pdf";
+    const isPDF = file.mimetype === "application/pdf" || fileExtension === "pdf" || looksLikePdf;
 
     if (isImage) {
         subFolder = "images";
@@ -51,6 +55,8 @@ const uploadToR2 = async (file, folder = "uploads") => {
         }
     } else if (isPDF) {
         subFolder = "resumes";
+        fileExtension = "pdf";
+        finalMimeType = "application/pdf";
         finalBuffer = await compressPDF(file.buffer);
     } else {
         throw new Error("Unsupported file type extension");

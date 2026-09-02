@@ -64,24 +64,24 @@ export default function CampaignsPage() {
     <div className="space-y-7">
       <div>
         <p className="label-caption mb-1" style={{ color: "var(--th-text-faint)" }}>Placement</p>
-        <h1 className="text-[2rem] font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>Campaigns</h1>
+        <h1 className="text-[1.65rem] sm:text-[2rem] font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>Campaigns</h1>
         <p className="text-sm mt-0.5" style={{ color: "var(--th-text-faint)" }}>
           Placement drives assigned to you {batch?.name ? <>· batch <strong style={{ color: "var(--th-text-secondary)" }}>{batch.name}</strong></> : null}
         </p>
       </div>
 
       {isError && (
-        <div className="flex items-center gap-2 rounded-xl border p-4 text-sm" style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-card-bg)", color: "var(--th-text-secondary)" }}>
-          <GraduationCap size={16} className="text-amber-500" />
-          You&apos;re not part of an active placement batch yet — your college adds you when a drive starts.
-          <button onClick={() => refetch()} className="ml-auto text-blue-600 dark:text-blue-400 text-xs">Retry</button>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 rounded-xl border p-4 text-sm" style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-card-bg)", color: "var(--th-text-secondary)" }}>
+          <span className="flex items-start gap-2"><GraduationCap size={16} className="text-amber-500 shrink-0 mt-0.5" />
+            You&apos;re not part of an active placement batch yet — your college adds you when a drive starts.</span>
+          <button onClick={() => refetch()} className="sm:ml-auto self-start text-blue-600 dark:text-blue-400 text-xs shrink-0">Retry</button>
         </div>
       )}
 
       {isLoading ? (
         <div className="grid gap-4 md:grid-cols-2"><SkeletonCard className="h-44" /><SkeletonCard className="h-44" /></div>
       ) : !isError && campaigns.length === 0 ? (
-        <div className="rounded-2xl border p-12 text-center" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
+        <div className="rounded-2xl border p-8 sm:p-12 text-center" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
           <Megaphone size={28} className="mx-auto mb-3" style={{ color: "var(--th-text-faint)" }} />
           <p className="text-sm font-semibold" style={{ color: "var(--th-text-primary)" }}>No active campaigns</p>
           <p className="text-xs mt-1" style={{ color: "var(--th-text-faint)" }}>When your placement cell schedules a drive for your batch, it shows up here with the rounds and deadline.</p>

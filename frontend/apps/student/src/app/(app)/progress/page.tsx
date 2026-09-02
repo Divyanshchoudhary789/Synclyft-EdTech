@@ -74,7 +74,7 @@ export default function ProgressPage() {
     <div className="space-y-8">
         <div>
           <p className="label-caption mb-1" style={{ color: "var(--th-text-faint)" }}>Progress Tracker</p>
-          <h1 className="text-[2rem] font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
+          <h1 className="text-[1.65rem] sm:text-[2rem] font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
             Your progress
           </h1>
           <p className="text-sm mt-0.5" style={{ color: "var(--th-text-faint)" }}>Readiness, mock-interview history and your connected coding platforms</p>

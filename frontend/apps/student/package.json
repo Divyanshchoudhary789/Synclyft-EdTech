@@ -9,10 +9,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@synclyft/lib": "*",
-    "@synclyft/ui": "*",
     "@hookform/resolvers": "^5.4.0",
     "@monaco-editor/react": "^4.7.0",
+    "@synclyft/lib": "*",
+    "@synclyft/ui": "*",
     "@tanstack/react-query": "^5.101.0",
     "@tanstack/react-table": "^8.21.3",
     "@tensorflow-models/face-landmarks-detection": "^1.0.6",
@@ -30,6 +30,7 @@
     "react-hot-toast": "^2.6.0",
     "react-is": "^19.2.7",
     "recharts": "^3.8.1",
+    "simli-client": "^3.0.2",
     "socket.io-client": "^4.8.3",
     "tailwind-merge": "^3.6.0",
     "tailwindcss-animate": "^1.0.7",

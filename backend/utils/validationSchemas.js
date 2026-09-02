@@ -1005,7 +1005,7 @@ const insightsSchemas = {
   generatePlan: Joi.object({
     sourceSessionId: Joi.string().optional().allow(null, ''),
     targetRole: Joi.string().max(200).optional().trim().allow(null, ''),
-    jobDescription: Joi.string().max(5000).optional().trim().allow(null, '')
+    jobDescription: Joi.string().max(20000).optional().trim().allow(null, '')
   }),
 
   planIdParam: Joi.object({

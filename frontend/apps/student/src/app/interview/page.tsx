@@ -1,21 +1,7 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import dynamic from "next/dynamic";
-
-// Force absolute dynamic client injection - disables SSR completely for this Heavy Engineering component
-// @ts-ignore
-const InterviewWorkspace = dynamic(
-  // @ts-ignore
-  () => import("@/components/InterviewWorkspace"),
-  { ssr: false }
-);
-
-export default function InterviewPage() {
-  return (
-    <>
-      <title>Secure Exam Workspace | Proctored Environment</title>
-      <meta name="description" content="AI-Enabled High-Security Proctored Coding Terminal" />
-      <InterviewWorkspace />
-    </>
-  );
+// The interview flow always begins at setup. A bare /interview visit is a
+// mistake / stale bookmark — send them to the configuration screen.
+export default function InterviewIndexPage() {
+  redirect("/interview/setup");
 }

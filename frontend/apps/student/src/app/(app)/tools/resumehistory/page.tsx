@@ -61,7 +61,7 @@ export default function ResumeHistoryPage() {
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <p className="label-caption mb-1" style={{ color: "var(--th-text-faint)" }}>Resume</p>
-          <h1 className="text-[2rem] font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>Resume history</h1>
+          <h1 className="text-[1.65rem] sm:text-[2rem] font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>Resume history</h1>
           <p className="text-sm mt-0.5" style={{ color: "var(--th-text-faint)" }}>Past AI analyses and every resume you&apos;ve saved in the builder</p>
         </div>
         <Link href="/resume"><Button icon={<Sparkles size={14} />}>New analysis</Button></Link>
@@ -117,7 +117,7 @@ function AnalysesTab() {
 
   if (items.length === 0)
     return (
-      <div className="rounded-2xl border p-12 text-center" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
+      <div className="rounded-2xl border p-8 sm:p-12 text-center" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
         <Gauge size={28} className="mx-auto mb-3" style={{ color: "var(--th-text-faint)" }} />
         <p className="text-sm font-semibold" style={{ color: "var(--th-text-primary)" }}>No analyses yet</p>
         <p className="text-xs mt-1 mb-4" style={{ color: "var(--th-text-faint)" }}>Upload a resume and pick a target role — the AI scores it for ATS-readiness and lists exactly what to fix.</p>
@@ -315,7 +315,7 @@ function ResumesTab() {
 
   if (rows.length === 0)
     return (
-      <div className="rounded-2xl border p-12 text-center" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
+      <div className="rounded-2xl border p-8 sm:p-12 text-center" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
         <FileText size={28} className="mx-auto mb-3" style={{ color: "var(--th-text-faint)" }} />
         <p className="text-sm font-semibold" style={{ color: "var(--th-text-primary)" }}>No saved resumes</p>
         <p className="text-xs mt-1 mb-4" style={{ color: "var(--th-text-faint)" }}>Build a resume in the studio and it&apos;ll be saved here.</p>

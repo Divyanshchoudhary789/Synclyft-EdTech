@@ -57,7 +57,7 @@ export default function BillingPage() {
     <div className="mx-auto max-w-4xl space-y-8">
         <div>
           <p className="label-caption mb-1" style={{ color: "var(--th-text-faint)" }}>Billing</p>
-          <h1 className="text-[2rem] font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
+          <h1 className="text-[1.65rem] sm:text-[2rem] font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
             Invoices &amp; billing
           </h1>
           <p className="text-sm mt-0.5" style={{ color: "var(--th-text-faint)" }}>Your subscription status and downloadable GST invoices</p>

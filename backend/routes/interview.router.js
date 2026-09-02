@@ -5,6 +5,8 @@ const isAuthenticated = require("../middlewares/authMiddleware.js");
 const authorizeRoles = require("../middlewares/authorizeRoles.js");
 const uploadResume = require("../middlewares/uploadResume.js");
 const uploadValidation = require("../middlewares/uploadValidation.js");
+const validateResumeUpload = require("../middlewares/validateResumeUpload.js");
+const { handleUploadErrors } = require("../middlewares/handleUploadErrors.js");
 const { resolveSeatContext, requireActiveSeat } = require("../middlewares/seatAccessMiddleware.js");
 const verifyInterviewOwnership = require("../middlewares/verifyInterviewOwnership.js");
 const { validate } = require("../middlewares/validationMiddleware.js");
@@ -29,7 +31,7 @@ interviewRouter.use(
 );
 
 
-interviewRouter.post("/initialize", uploadResume.single("resume"), validate(interviewSchemas.createSession, 'body'), startInterviewSession);
+interviewRouter.post("/initialize", uploadResume.single("resume"), handleUploadErrors, validateResumeUpload(false), validate(interviewSchemas.createSession, 'body'), startInterviewSession);
 
 // Everything below is addressed by :sessionId — confirm ownership up front.
 interviewRouter.use("/session/:sessionId", verifyInterviewOwnership);

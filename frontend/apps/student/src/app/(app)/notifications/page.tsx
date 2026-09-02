@@ -20,7 +20,7 @@ export default function NotificationsPage() {
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
             <p className="label-caption mb-1" style={{ color: "var(--th-text-faint)" }}>Inbox</p>
-            <h1 className="text-[2rem] font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
+            <h1 className="text-[1.65rem] sm:text-[2rem] font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
               Notifications
             </h1>
             <p className="text-sm mt-0.5" style={{ color: "var(--th-text-faint)" }}>

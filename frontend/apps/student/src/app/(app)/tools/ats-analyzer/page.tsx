@@ -486,16 +486,16 @@ export default function ATSAnalyzerPage() {
       <div className="space-y-6">
 
         {/* Top title and Template switcher block */}
-        <div className="flex items-center justify-between gap-4 flex-wrap pb-4 border-b" style={{ borderColor: "var(--th-border)" }}>
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-4 border-b" style={{ borderColor: "var(--th-border)" }}>
           <div>
             <p className="label-caption mb-1" style={{ color: "var(--th-text-faint)" }}>Resume Studio</p>
-            <h1 className="text-[2rem] font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
+            <h1 className="text-2xl sm:text-[2rem] font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
               Resume builder &amp; AI advisor
             </h1>
           </div>
 
           {/* Color swatches & Format Switcher Row */}
-          <div className="flex items-center gap-4 flex-wrap">
+          <div className="flex items-center gap-3 flex-wrap">
 
             {/* Color Swatch Selectors */}
             <div className="flex items-center gap-1.5 bg-[var(--th-bg-secondary)] px-2.5 py-1.5 rounded-xl border" style={{ borderColor: "var(--th-border-strong)" }}>
@@ -541,7 +541,7 @@ export default function ATSAnalyzerPage() {
         </div>
 
         {/* ── 3 COLUMN PANEL WORKSPACE ── */}
-        <div className="grid lg:grid-cols-12 gap-6 items-start">
+        <div className="grid lg:grid-cols-12 gap-4 lg:gap-6 items-start">
 
           {/* PANEL 1: RESUME EDITOR (col-span-4) */}
           <div className="lg:col-span-4 space-y-4">
@@ -598,7 +598,7 @@ export default function ATSAnalyzerPage() {
                         style={{ borderColor: "var(--th-border-strong)" }}
                       />
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div className="space-y-1">
                         <label className="text-[10px] uppercase font-bold text-[var(--th-text-faint)]">Phone</label>
                         <input
@@ -622,7 +622,7 @@ export default function ATSAnalyzerPage() {
                     </div>
 
                     {/* Social links creation inputs */}
-                    <div className="grid grid-cols-2 gap-3 pt-2 border-t" style={{ borderColor: "var(--th-border)" }}>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t" style={{ borderColor: "var(--th-border)" }}>
                       <div className="space-y-1">
                         <label className="text-[10px] uppercase font-bold text-[var(--th-text-faint)]">LinkedIn Link</label>
                         <input
@@ -659,7 +659,7 @@ export default function ATSAnalyzerPage() {
                       />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3 pt-2 border-t" style={{ borderColor: "var(--th-border)" }}>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t" style={{ borderColor: "var(--th-border)" }}>
                       <div className="space-y-1">
                         <label className="text-[10px] uppercase font-bold text-[var(--th-text-faint)]">Target Role</label>
                         <input
@@ -725,7 +725,7 @@ export default function ATSAnalyzerPage() {
                           <span className="text-[10px] font-bold uppercase text-[var(--th-text-faint)]">Position #{idx + 1}</span>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-2.5">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                           <div className="space-y-0.5">
                             <label className="text-[8px] uppercase font-bold text-[var(--th-text-faint)]">Role</label>
                             <input
@@ -756,7 +756,7 @@ export default function ATSAnalyzerPage() {
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-2.5">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                           <div className="space-y-0.5 col-span-2">
                             <label className="text-[8px] uppercase font-bold text-[var(--th-text-faint)]">Dates / Duration</label>
                             <input
@@ -831,7 +831,7 @@ export default function ATSAnalyzerPage() {
                           />
                         </div>
 
-                        <div className="grid grid-cols-2 gap-2.5">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                           <div className="space-y-0.5">
                             <label className="text-[8px] uppercase font-bold text-[var(--th-text-faint)]">Degree</label>
                             <input
@@ -891,7 +891,7 @@ export default function ATSAnalyzerPage() {
                           <span className="text-[10px] font-bold uppercase text-[var(--th-text-faint)]">Project #{idx + 1}</span>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-2.5">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                           <div className="space-y-0.5 text-left">
                             <label className="text-[8px] uppercase font-bold text-[var(--th-text-faint)]">Project Title</label>
                             <input
@@ -981,7 +981,7 @@ export default function ATSAnalyzerPage() {
                           />
                         </div>
 
-                        <div className="grid grid-cols-2 gap-2.5">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                           <div className="space-y-0.5 text-left">
                             <label className="text-[8px] uppercase font-bold text-[var(--th-text-faint)]">Issuer</label>
                             <input
@@ -1078,7 +1078,7 @@ export default function ATSAnalyzerPage() {
 
             {/* Sheet Preview Simulator Card */}
             <div className={cn(
-              "border shadow-xl rounded-2xl p-6 min-h-[660px] text-left transition-all duration-300 flex flex-col justify-between relative",
+              "border shadow-xl rounded-2xl p-4 sm:p-6 min-h-[460px] sm:min-h-[660px] text-left transition-all duration-300 flex flex-col justify-between relative overflow-x-auto",
               paperBgStyles[paperColor]
             )} id="resume-sheet">
 

@@ -67,17 +67,20 @@ api.interceptors.response.use(
 export interface ApiErrorShape {
   message: string;
   status?: number;
+  /** Machine-readable error code from the API (e.g. "ROUND_TIME_UP"). */
+  code?: string;
   errors?: Array<{ field: string; message: string }>;
 }
 
 export function toApiError(err: unknown): ApiErrorShape {
   if (axios.isAxiosError(err)) {
     const data = err.response?.data as
-      | { message?: string; errors?: ApiErrorShape["errors"] }
+      | { message?: string; code?: string; errors?: ApiErrorShape["errors"] }
       | undefined;
     return {
       message: data?.message ?? err.message ?? "Something went wrong",
       status: err.response?.status,
+      code: data?.code,
       errors: data?.errors,
     };
   }

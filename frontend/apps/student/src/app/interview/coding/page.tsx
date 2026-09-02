@@ -95,7 +95,7 @@ export default function CodingRoundPage() {
       // restore any saved draft for this problem
       let draft = "";
       try { draft = sessionStorage.getItem(`interview:coding:${session.sessionId}:p${p}`) ?? ""; } catch { /* */ }
-      setCode(draft || STARTERS[language] ?? STARTERS.python);
+      setCode(draft || (STARTERS[language] ?? STARTERS.python));
       setPhase("solve");
     } catch (err) {
       setErrorMsg(toApiError(err).message);
@@ -130,7 +130,7 @@ export default function CodingRoundPage() {
       try { if (draftKey) sessionStorage.removeItem(draftKey); } catch { /* */ }
     } catch (err) {
       const e = toApiError(err);
-      if ((e as { code?: string }).code === "ROUND_TIME_UP") { setPhase("done"); }
+      if (e.code === "ROUND_TIME_UP") { setPhase("done"); }
       else { toast.error(e.message); setPhase("solve"); }
     }
   };

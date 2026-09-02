@@ -244,7 +244,7 @@ InterviewAnalyticsSchema.statics.getInterviewPerformanceHeatmap = async function
                     hour: { $hour: '$startedAt' }
                 },
                 sessionCount: { $sum: 1 },
-                averageScore: { $avg: '$finalCompositeScore' },
+                averageScore: { $avg: '$overallScore' },
                 completionRate: { 
                     $avg: { $cond: [{ $ne: ['$completedAt', null] }, 1, 0] } 
                 }

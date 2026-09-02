@@ -355,7 +355,7 @@ export default function LandingPage() {
             className="max-w-7xl mx-auto px-4 sm:px-6 pt-4 md:pt-6 pb-6"
           >
             {/* Two-column layout */}
-            <div className="grid lg:grid-cols-2 gap-12 items-center">
+            <div className="grid lg:grid-cols-2 gap-8 lg:gap-12 items-center">
               {/* LEFT: Text content */}
               <div className="text-left space-y-5">
 
@@ -480,7 +480,7 @@ export default function LandingPage() {
       </section>
 
       {/* Student vs Officer Portal Interactive Showcase */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 py-24">
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 py-14 sm:py-24">
         <div className="text-center max-w-2xl mx-auto mb-16 space-y-3">
           <span className="label-caption" style={{ color: "var(--th-text-faint)" }}>Two platforms, one unified system</span>
           <h2
@@ -543,7 +543,7 @@ export default function LandingPage() {
                 transition={{ duration: 0.3 }}
                 className="w-full max-w-5xl"
               >
-                <div className="p-6 md:p-8 shadow-lg rounded-2xl grid md:grid-cols-12 gap-8 items-center" style={{ backgroundColor: "var(--th-card-bg)", border: "1px solid var(--th-card-border)" }}>
+                <div className="p-6 md:p-8 shadow-lg rounded-2xl grid md:grid-cols-12 gap-6 md:gap-8 items-center" style={{ backgroundColor: "var(--th-card-bg)", border: "1px solid var(--th-card-border)" }}>
                   <div className="md:col-span-7 space-y-6">
                     <div className="flex items-center justify-between">
                       <Badge variant="amber">Student Portal</Badge>
@@ -598,7 +598,7 @@ export default function LandingPage() {
                 transition={{ duration: 0.3 }}
                 className="w-full max-w-5xl"
               >
-                <div className="card-light p-6 md:p-8 shadow-xl rounded-2xl bg-var(--th-bg-secondary) text-var(--th-text-primary) grid md:grid-cols-12 gap-8 items-center">
+                <div className="card-light p-6 md:p-8 shadow-xl rounded-2xl bg-var(--th-bg-secondary) text-var(--th-text-primary) grid md:grid-cols-12 gap-6 md:gap-8 items-center">
                   <div className="md:col-span-7 space-y-6">
                     <div className="flex items-center justify-between">
                       <Badge variant="cobalt">Officer Portal</Badge>
