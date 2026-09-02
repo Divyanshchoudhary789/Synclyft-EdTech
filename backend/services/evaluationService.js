@@ -31,6 +31,11 @@ const judge0Headers = () => {
 };
 
 const executeCodeOnJudge0 = async (code, language, testCases) => {
+    if (!process.env.JUDGE0_URL) {
+        const err = new Error("Code execution sandbox is not configured.");
+        err.isSandboxUnavailable = true;
+        throw err;
+    }
     try {
         if (!testCases || testCases.length === 0) {
             throw new Error("No test cases provided for evaluation.");
@@ -78,7 +83,15 @@ const executeCodeOnJudge0 = async (code, language, testCases) => {
         return allOutputs;
     } catch (error) {
         logger.error("Judge0 Engine Call Defect:", error.message, error.stack);
-        throw new Error(`Sandbox compiler pipeline failed: ${error.message}`);
+        const err = new Error(`Sandbox compiler pipeline failed: ${error.message}`);
+        // Network / 5xx / timeout to Judge0 → treat as "sandbox temporarily
+        // unavailable" so the round can still be graded on code inspection.
+        if (error.isSandboxUnavailable || error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT'
+            || error.code === 'ENOTFOUND' || (error.response && error.response.status >= 500)
+            || /timeout/i.test(error.message || '')) {
+            err.isSandboxUnavailable = true;
+        }
+        throw err;
     }
 };
 

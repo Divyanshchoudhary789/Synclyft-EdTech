@@ -4,28 +4,29 @@
 // Per-round time budgets. All values are in SECONDS and are fully configurable
 // here without touching business logic. Durations are computed on the server
 // (never trusted from the client) so the timer cannot be tampered with.
+//
+// These are total-round budgets sized for a realistic mock interview, not
+// generous per-question allowances. A candidate can always finish early.
 // =============================================================================
 
 const ROUND_DURATION_POLICY = {
-    // Round 1 - Aptitude: 15 questions are served PER selected topic.
-    // Time = (topics selected) * 15 * perQuestionSeconds.
+    // Round 1 - Aptitude: 15 MCQs are served PER selected topic.
+    // Budget = (topics selected) * 15 * perQuestionSeconds, capped.
     aptitude: {
-        perQuestionSeconds: 40,
+        perQuestionSeconds: 60,
+        maxTotalSeconds: 75 * 60, // hard cap even if many topics picked
     },
 
-    // Round 2 - Coding: fixed distribution 3 Easy / 5 Medium / 2 Hard.
+    // Round 2 - Coding: fixed distribution 3 Easy / 5 Medium / 2 Hard,
+    // one flat budget for the whole round.
     coding: {
-        byDifficulty: {
-            Easy: 20 * 60,   // 20 min
-            Medium: 30 * 60, // 30 min
-            Hard: 45 * 60,   // 45 min
-        },
+        totalSeconds: 60 * 60, // 60 min
     },
 
     // Round 3 - Technical: AI persona phase + one hard coding question.
     technical: {
-        personaSeconds: 5 * 60,  // 5 min verbal persona
-        codingSeconds: 45 * 60,  // 45 min hard code
+        personaSeconds: 10 * 60, // 10 min verbal persona
+        codingSeconds: 30 * 60,  // 30 min hard code
     },
 
     // Round 4 - HR: live voice conversation.
@@ -34,7 +35,7 @@ const ROUND_DURATION_POLICY = {
     },
 };
 
-// Fixed difficulty breakdown for the coding round (matches your spec).
+// Fixed difficulty breakdown for the coding round (matches the spec).
 const CODING_DISTRIBUTION = { Easy: 3, Medium: 5, Hard: 2 };
 
 /**
@@ -48,18 +49,12 @@ function computeRoundDurationSeconds(roundType, opts = {}) {
 
     switch (roundType) {
         case "aptitude": {
-            const totalQuestions = topicsCount * 15;
-            return totalQuestions * ROUND_DURATION_POLICY.aptitude.perQuestionSeconds;
+            const { perQuestionSeconds, maxTotalSeconds } = ROUND_DURATION_POLICY.aptitude;
+            const totalQuestions = Math.max(1, topicsCount) * 15;
+            return Math.min(totalQuestions * perQuestionSeconds, maxTotalSeconds);
         }
-        case "coding": {
-            const { Easy, Medium, Hard } = CODING_DISTRIBUTION;
-            const { byDifficulty } = ROUND_DURATION_POLICY.coding;
-            return (
-                Easy * byDifficulty.Easy +
-                Medium * byDifficulty.Medium +
-                Hard * byDifficulty.Hard
-            );
-        }
+        case "coding":
+            return ROUND_DURATION_POLICY.coding.totalSeconds;
         case "technical": {
             const { personaSeconds, codingSeconds } = ROUND_DURATION_POLICY.technical;
             return personaSeconds + codingSeconds;

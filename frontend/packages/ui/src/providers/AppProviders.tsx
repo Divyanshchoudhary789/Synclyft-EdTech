@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "react-hot-toast";
 import { ThemeProvider } from "@synclyft/lib/theme";
 import { useAuthStore } from "@synclyft/lib/store/auth";
+import { ErrorBoundary } from "../ErrorBoundary";
 
 function makeQueryClient() {
   return new QueryClient({
@@ -58,7 +59,7 @@ export function AppProviders({
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <AuthExpiryGate publicPrefixes={publicPrefixes} />
-        {children}
+        <ErrorBoundary>{children}</ErrorBoundary>
         <Toaster
           position="top-right"
           toastOptions={{

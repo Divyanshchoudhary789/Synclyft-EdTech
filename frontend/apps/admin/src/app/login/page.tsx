@@ -11,6 +11,7 @@ export default function AdminLoginPage() {
         subheading="Restricted access · Synclyft platform operations"
         expectedRole="super-admin"
         redirectTo="/dashboard"
+        art={false}
       />
     </Suspense>
   );

@@ -1,5 +1,7 @@
 const mongoose = require('mongoose');
 const Resume = require("../models/ResumeModel.js");
+const ResumeAnalysis = require("../models/ResumeAnalysisModel.js");
+const StudentProfile = require("../models/StudentProfileModel.js");
 const { analyzeResumeATS, analyzeResumeFromText } = require("../services/geminiService.js");
 const { extractResumeText } = require("../utils/resumeTextExtractor.js");
 const { ApiError } = require("../utils/errorHandler.js");
@@ -186,9 +188,99 @@ const analyzeResumeFile = async (req, res) => {
             targetJD
         });
 
-        return res.status(200).json({ success: true, analysis });
+        const atsScore = Math.max(0, Math.min(100, Math.round(Number(analysis.atsScoreEstimate) || 0)));
+
+        let saved = null;
+        try {
+            saved = await ResumeAnalysis.create({
+                user: req.user.id,
+                fileName: req.file.originalname || '',
+                targetRole: targetRole || '',
+                experienceLevel: experienceLevel || '',
+                hasJobDescription: Boolean(targetJD && String(targetJD).trim()),
+                atsScore,
+                matchedKeywords: analysis.matchedKeywords || [],
+                missingKeywords: analysis.missingKeywords || [],
+                strengths: analysis.strengths || [],
+                weaknesses: analysis.weaknesses || [],
+                summarySuggestion: analysis.summarySuggestion || '',
+                experienceImprovements: analysis.experienceImprovements || [],
+                projectImprovements: analysis.projectImprovements || [],
+                certificationImprovements: analysis.certificationImprovements || [],
+                generalTips: analysis.generalTips || []
+            });
+
+            await StudentProfile.updateOne(
+                { user: req.user.id },
+                { $set: { atsScore, atsLastCheckedAt: new Date() } }
+            );
+        } catch (persistErr) {
+            logger.error({ message: 'analyzeResumeFile persist error', error: persistErr.message });
+        }
+
+        return res.status(200).json({ success: true, analysis, analysisId: saved ? saved._id : null });
     } catch (err) {
         logger.error({ message: 'analyzeResumeFile error', error: err.message, stack: err.stack });
+        return sendError(res, err);
+    }
+};
+
+
+// 8. List past AI resume analyses (paginated)
+const getResumeAnalyses = async (req, res) => {
+    try {
+        const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 50);
+        const skip = (page - 1) * limit;
+
+        const filter = { user: req.user.id };
+
+        const [analyses, total] = await Promise.all([
+            ResumeAnalysis.find(filter)
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean(),
+            ResumeAnalysis.countDocuments(filter)
+        ]);
+
+        return res.status(200).json({
+            success: true,
+            analyses,
+            pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
+        });
+    } catch (err) {
+        logger.error({ message: 'getResumeAnalyses error', error: err.message, stack: err.stack });
+        return sendError(res, err);
+    }
+};
+
+
+// 9. Fetch a single analysis (ownership enforced)
+const getResumeAnalysisById = async (req, res) => {
+    try {
+        const analysis = await ResumeAnalysis.findOne({ _id: req.params.id, user: req.user.id }).lean();
+        if (!analysis) {
+            throw new ApiError(404, 'Analysis not found');
+        }
+        return res.status(200).json({ success: true, analysis });
+    } catch (err) {
+        logger.error({ message: 'getResumeAnalysisById error', error: err.message, stack: err.stack });
+        return sendError(res, err);
+    }
+};
+
+
+// 10. Delete an analysis (ownership enforced)
+const deleteResumeAnalysis = async (req, res) => {
+    try {
+        const analysis = await ResumeAnalysis.findOneAndDelete({ _id: req.params.id, user: req.user.id });
+        if (!analysis) {
+            throw new ApiError(404, 'Analysis not found');
+        }
+        return res.status(200).json({ success: true, message: 'Analysis deleted' });
+    } catch (err) {
+        logger.error({ message: 'deleteResumeAnalysis error', error: err.message, stack: err.stack });
         return sendError(res, err);
     }
 };
@@ -201,5 +293,8 @@ module.exports = {
     getResumeById,
     deleteResume,
     optimizeResumeAI,
-    analyzeResumeFile
+    analyzeResumeFile,
+    getResumeAnalyses,
+    getResumeAnalysisById,
+    deleteResumeAnalysis
 };

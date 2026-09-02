@@ -19,9 +19,10 @@
 
 @plugin "tailwindcss-animate";
 
-/* Monorepo: ensure Tailwind scans this shared package's components for classes,
-   regardless of which app imports this stylesheet. */
-@source "../components";
+/* Monorepo: ensure Tailwind scans this shared package's source for classes,
+   regardless of which app imports this stylesheet. Covers components/, auth/,
+   providers/, and any top-level .tsx (ErrorBoundary). */
+@source "../";
 
 @theme {
   /* ── Ink Palette (Focus Mode / Dark surfaces) ── */
@@ -296,27 +297,28 @@ html.light {
 /* ── Component Layer ── */
 @layer components {
 
-  /* ── Buttons ── */
+  /* ── Buttons — theme-aware so they're visible in both light and dark ── */
   .btn-primary {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
     padding: 0.625rem 1.25rem;
-    background-color: var(--color-signal-amber);
+    background-color: var(--th-primary);
     color: #FFFFFF;
     font-family: var(--font-body);
-    font-weight: 500;
+    font-weight: 600;
     font-size: var(--font-size-body-sm);
     border-radius: var(--radius-input);
     border: none;
     cursor: pointer;
-    transition: background-color 150ms ease, opacity 150ms ease;
+    transition: filter 150ms ease, opacity 150ms ease;
     white-space: nowrap;
+    box-shadow: 0 2px 10px color-mix(in srgb, var(--th-primary) 22%, transparent);
   }
 
   .btn-primary:hover {
-    background-color: color-mix(in srgb, var(--color-signal-amber) 92%, black);
+    filter: brightness(1.08);
   }
 
   .btn-primary:active {
@@ -324,8 +326,9 @@ html.light {
   }
 
   .btn-primary:disabled {
-    opacity: 0.4;
+    opacity: 0.45;
     cursor: not-allowed;
+    box-shadow: none;
   }
 
   .btn-secondary {
@@ -334,22 +337,26 @@ html.light {
     justify-content: center;
     gap: 0.5rem;
     padding: 0.625rem 1.25rem;
-    background-color: transparent;
-    color: var(--color-ink-200);
+    background-color: var(--th-surface);
+    color: var(--th-text-primary);
     font-family: var(--font-body);
-    font-weight: 500;
+    font-weight: 600;
     font-size: var(--font-size-body-sm);
     border-radius: var(--radius-input);
-    border: 1px solid var(--color-ink-700);
+    border: 1px solid var(--th-border-strong);
     cursor: pointer;
     transition: border-color 150ms ease, color 150ms ease, background-color 150ms ease;
     white-space: nowrap;
   }
 
   .btn-secondary:hover {
-    border-color: var(--color-ink-500);
-    color: var(--color-ink-100);
-    background-color: rgba(255, 255, 255, 0.03);
+    border-color: var(--th-primary);
+    background-color: var(--th-hover-bg);
+  }
+
+  .btn-secondary:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
   }
 
   .btn-ghost {
@@ -359,9 +366,9 @@ html.light {
     gap: 0.5rem;
     padding: 0.5rem 0.75rem;
     background-color: transparent;
-    color: var(--color-ink-400);
+    color: var(--th-text-secondary);
     font-family: var(--font-body);
-    font-weight: 400;
+    font-weight: 500;
     font-size: var(--font-size-body-sm);
     border-radius: var(--radius-input);
     border: none;
@@ -370,8 +377,8 @@ html.light {
   }
 
   .btn-ghost:hover {
-    color: var(--color-ink-200);
-    background-color: rgba(255, 255, 255, 0.05);
+    color: var(--th-text-primary);
+    background-color: var(--th-hover-bg);
   }
 
   /* Intelligence Mode buttons */
@@ -576,15 +583,19 @@ html.light {
     }
   }
 
-  /* ── Skeleton ── */
+  /* ── Skeleton — theme-aware so it isn't a black block in light mode ── */
   .skeleton {
     background: linear-gradient(90deg,
-        var(--color-ink-800) 25%,
-        var(--color-ink-700) 50%,
-        var(--color-ink-800) 75%);
+        var(--th-bg-secondary) 25%,
+        color-mix(in srgb, var(--th-bg-secondary) 55%, var(--th-border)) 50%,
+        var(--th-bg-secondary) 75%);
     background-size: 200% 100%;
     animation: shimmer 1.5s ease-in-out infinite;
     border-radius: var(--radius-card);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton { animation: none; background: var(--th-bg-secondary); }
   }
 
   @keyframes shimmer {
@@ -594,6 +605,20 @@ html.light {
 
     100% {
       background-position: -200% 0;
+    }
+  }
+
+  /* ── Auth card entrance — pure CSS so it never leaves the element stuck
+     hidden the way framer-motion's initial/animate did on router back-nav. ── */
+  @keyframes lf-rise {
+    from {
+      opacity: 0;
+      transform: translateY(16px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
     }
   }
 
@@ -611,19 +636,5 @@ html.light {
   input::-ms-reveal,
   input::-ms-clear {
     display: none !important;
-  }
-}
-
-/* ── Sidebar Layout Helper ── */
-@media (min-width: 768px) {
-  body.has-sidebar {
-    padding-top: 80px !important;
-    transition: padding-left 0.3s ease-in-out, padding-top 0.3s ease-in-out;
-  }
-  body.has-sidebar-expanded {
-    padding-left: 256px !important;
-  }
-  body.has-sidebar-collapsed {
-    padding-left: 72px !important;
   }
 }

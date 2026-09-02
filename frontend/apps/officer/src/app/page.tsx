@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { motion } from "framer-motion";
 import {
   ArrowRight,
   BarChart3,
@@ -89,30 +88,21 @@ export default function OfficerLanding() {
 
       <main>
         <section className="mx-auto max-w-6xl px-5 pb-20 pt-20 text-center md:pt-28">
-          <motion.h1
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
+          <h1
             className="mx-auto max-w-3xl text-4xl font-semibold leading-tight md:text-6xl"
             style={{ fontFamily: "var(--font-inter-tight), sans-serif" }}
           >
             Run your placement drive on data, not guesswork.
-          </motion.h1>
-          <motion.p
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.08 }}
+          </h1>
+          <p
             className="mx-auto mt-6 max-w-2xl text-base md:text-lg"
             style={{ color: "var(--th-text-secondary)" }}
           >
             Synclyft gives your placement cell a live command centre — every student&apos;s
             interview readiness, benchmarked across batches, with AI-driven interventions
             that actually move the numbers.
-          </motion.p>
-          <motion.div
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.16 }}
+          </p>
+          <div
             className="mt-9 flex flex-wrap items-center justify-center gap-3"
           >
             <Link href="/register">
@@ -125,7 +115,7 @@ export default function OfficerLanding() {
                 Sign in to portal
               </Button>
             </Link>
-          </motion.div>
+          </div>
         </section>
 
         <section
@@ -133,13 +123,9 @@ export default function OfficerLanding() {
           style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-bg-secondary)" }}
         >
           <div className="mx-auto grid max-w-6xl gap-6 px-5 sm:grid-cols-2 lg:grid-cols-3">
-            {FEATURES.map((f, i) => (
-              <motion.div
+            {FEATURES.map((f) => (
+              <div
                 key={f.title}
-                initial={{ opacity: 0, y: 16 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.4, delay: i * 0.05 }}
                 className="rounded-xl border p-5"
                 style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-bg)" }}
               >
@@ -153,7 +139,7 @@ export default function OfficerLanding() {
                 <p className="mt-1.5 text-sm" style={{ color: "var(--th-text-secondary)" }}>
                   {f.body}
                 </p>
-              </motion.div>
+              </div>
             ))}
           </div>
         </section>

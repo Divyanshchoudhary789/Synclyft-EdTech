@@ -5,6 +5,9 @@ interface TimerState {
   totalSeconds: number;
   remaining: number;
   isRunning: boolean;
+  /** Wall-clock deadline (epoch ms). When set, `remaining` is derived from it so
+   *  the timer stays accurate across refreshes / tab sleep. */
+  deadline: number | null;
 }
 
 interface ProctoringState {
@@ -43,6 +46,8 @@ interface InterviewStore {
   setSession: (session: InterviewSession) => void;
   setCurrentRound: (round: RoundType) => void;
   startTimer: (seconds: number) => void;
+  /** Start (or re-sync) the timer against a server-provided wall-clock deadline. */
+  startTimerWithDeadline: (deadlineMs: number, totalSeconds?: number) => void;
   tickTimer: () => void;
   stopTimer: () => void;
   resetTimer: () => void;
@@ -61,7 +66,7 @@ interface InterviewStore {
 export const useInterviewStore = create<InterviewStore>((set) => ({
   session: null,
   currentRound: null,
-  timer: { totalSeconds: 0, remaining: 0, isRunning: false },
+  timer: { totalSeconds: 0, remaining: 0, isRunning: false, deadline: null },
   proctoring: {
     isActive: false,
     cameraPermission: "pending",
@@ -86,22 +91,40 @@ export const useInterviewStore = create<InterviewStore>((set) => ({
   setCurrentRound: (round) => set({ currentRound: round }),
 
   startTimer: (seconds) =>
-    set({ timer: { totalSeconds: seconds, remaining: seconds, isRunning: true } }),
+    set({ timer: { totalSeconds: seconds, remaining: seconds, isRunning: true, deadline: null } }),
+
+  startTimerWithDeadline: (deadlineMs, totalSeconds) =>
+    set(() => {
+      const remaining = Math.max(0, Math.round((deadlineMs - Date.now()) / 1000));
+      return {
+        timer: {
+          totalSeconds: totalSeconds ?? remaining,
+          remaining,
+          isRunning: true,
+          deadline: deadlineMs,
+        },
+      };
+    }),
 
   tickTimer: () =>
-    set((state) => ({
-      timer: {
-        ...state.timer,
-        remaining: Math.max(0, state.timer.remaining - 1),
-      },
-    })),
+    set((state) => {
+      if (state.timer.deadline) {
+        return {
+          timer: {
+            ...state.timer,
+            remaining: Math.max(0, Math.round((state.timer.deadline - Date.now()) / 1000)),
+          },
+        };
+      }
+      return { timer: { ...state.timer, remaining: Math.max(0, state.timer.remaining - 1) } };
+    }),
 
   stopTimer: () =>
     set((state) => ({ timer: { ...state.timer, isRunning: false } })),
 
   resetTimer: () =>
     set((state) => ({
-      timer: { ...state.timer, remaining: state.timer.totalSeconds },
+      timer: { ...state.timer, remaining: state.timer.totalSeconds, deadline: null },
     })),
 
   selectAnswer: (questionId, answerId) =>
@@ -150,7 +173,7 @@ export const useInterviewStore = create<InterviewStore>((set) => ({
     set({
       session: null,
       currentRound: null,
-      timer: { totalSeconds: 0, remaining: 0, isRunning: false },
+      timer: { totalSeconds: 0, remaining: 0, isRunning: false, deadline: null },
       currentQuestionIndex: 0,
       selectedAnswers: {},
       messages: [],

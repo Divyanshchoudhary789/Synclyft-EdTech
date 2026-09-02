@@ -9,6 +9,18 @@ const subscriptionController = require("../controllers/subscriptionController.js
 const isAuthenticated = require("../middlewares/authMiddleware.js");
 const authorizeRoles = require("../middlewares/authorizeRoles.js");
 
+// Public — plan catalogue is marketing information, shown on the pricing page
+// before sign-in. Static data, no user context.
+subscriptionRouter.get(
+    '/plans/public',
+    asyncHandler(subscriptionController.getStudentPlans)
+);
+
+subscriptionRouter.get(
+    '/plans/org',
+    asyncHandler(subscriptionController.getOrgPlans)
+);
+
 subscriptionRouter.use(isAuthenticated);
 
 

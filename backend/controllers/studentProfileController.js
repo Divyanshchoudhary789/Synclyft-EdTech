@@ -42,7 +42,7 @@ const addProfileDetails = async (req, res) => {
     try {
         const userId = req.user.id;
         const resume = req.file;
-        let { branch, graduationYear, cgpa, attendance, targetRole, expectedCTC, skills, projects, preferredInterviewLanguage, codingLanguageChoices } = req.body;
+        let { branch, graduationYear, cgpa, attendance, targetRole, expectedCTC, skills, projects, preferredInterviewLanguage, codingLanguageChoices, bio } = req.body;
 
         if (!branch || !graduationYear || !cgpa || !attendance || !targetRole || !expectedCTC || !skills || !projects || !preferredInterviewLanguage || !codingLanguageChoices) {
             return res.status(400).json({ message: "All Fields are required!" });
@@ -71,6 +71,7 @@ const addProfileDetails = async (req, res) => {
         profile.projects = projects;
         profile.preferredInterviewLanguage = preferredInterviewLanguage;
         profile.codingLanguageChoices = Array.isArray(codingLanguageChoices) ? codingLanguageChoices : codingLanguageChoices.split(',').map(s => s.trim());
+        if (bio !== undefined) profile.bio = String(bio).slice(0, 500);
         profile.resumeUrl = result.url;
         profile.resumeKey = result.key;
 
@@ -113,12 +114,13 @@ const updateProfileDetails = async (req, res) => {
 
         const userId = req.user.id;
         const newResume = req.file;
-        let { branch, graduationYear, cgpa, attendance, targetRole, expectedCTC, skills, projects, preferredInterviewLanguage, codingLanguageChoices } = req.body;
+        let { branch, graduationYear, cgpa, attendance, targetRole, expectedCTC, skills, projects, preferredInterviewLanguage, codingLanguageChoices, bio } = req.body;
 
         const profile = await StudentProfile.findOne({ user: userId });
         if (!profile) {
             return res.status(404).json({ message: "Student Profile not found!" });
         }
+        if (bio !== undefined) profile.bio = String(bio).slice(0, 500);
 
         if (expectedCTC && typeof expectedCTC === 'string') expectedCTC = JSON.parse(expectedCTC);
         if (projects && typeof projects === 'string') projects = JSON.parse(projects);

@@ -2,10 +2,16 @@
 import React, { useEffect, useRef, useState } from 'react';
 import MonacoEditor from '@monaco-editor/react';
 import { io } from 'socket.io-client';
-import { api } from '../lib/api/api';
+import { api, toApiError } from '@synclyft/lib/api';
 import { TechAudioStreamer } from '../utils/techAudioStreamer';
+import toast from 'react-hot-toast';
 
-export default function TechnicalRoundWorkspace({ sessionId, roundId, simliSessionToken }) {
+const SOCKET_URL =
+  process.env.NEXT_PUBLIC_SOCKET_URL ||
+  (process.env.NEXT_PUBLIC_Backend_URL || '').replace(/\/api\/?$/, '') ||
+  'http://localhost:8080';
+
+export default function TechnicalRoundWorkspace({ sessionId, roundId, simliSessionToken, onComplete }) {
     // Phase Management Lifecycle State: 'persona' (AI Chat) or 'coding' (Monaco Workspace)
     const [roundPhase, setRoundPhase] = useState('persona');
     const [isConnecting, setIsConnecting] = useState(true);
@@ -22,8 +28,9 @@ export default function TechnicalRoundWorkspace({ sessionId, roundId, simliSessi
 
     useEffect(() => {
         // 1. Instantiating secure real-time multiplex connection interface targeting backend port 8080
-        socketRef.current = io(process.env.NEXT_PUBLIC_SOCKET_URL || 'https://ed-tech-backend-0awj.onrender.com', {
+        socketRef.current = io(SOCKET_URL, {
             transports: ['websocket'],
+            withCredentials: true,
             forceNew: true
         });
 
@@ -38,9 +45,6 @@ export default function TechnicalRoundWorkspace({ sessionId, roundId, simliSessi
 
         // 3. Socket Event Registrations Lifecycle
         socketRef.current.on('connect', () => {
-            console.log("[Tech Socket Active]: ID ->", socketRef.current.id);
-            
-            // Handshake join data schema execution
             socketRef.current.emit('join-technical-live-stream', {
                 sessionId,
                 roundId,
@@ -54,24 +58,21 @@ export default function TechnicalRoundWorkspace({ sessionId, roundId, simliSessi
         });
 
         // 🌟 AUTOMATION TRANSITION HOOK: Trigger layout morphing when 3 questions finish
-        socketRef.current.on('technical-persona-complete', async (data) => {
-            console.log("[Phase Transition Alert]: Verbal complete, initializing Monaco Editor structures...");
-            
-            // Kill mic audio arrays capture cleanly to avoid interference with logic implementations
+        socketRef.current.on('technical-persona-complete', async () => {
             if (streamerRef.current) streamerRef.current.stopAudioPipeline();
-            
             setRoundPhase('coding');
-
-            // Pull dynamic hard puzzle from your pre-existing controller HTTP endpoints maps safely
             try {
                 const res = await api.get(`/interview/technical-round-questions/${sessionId}`);
                 if (res.data.success) {
-                    setCodingQuestion(res.data.question?.selectedQuestion);
+                    const q = res.data.question?.questions?.[0]?.selectedQuestion ?? res.data.question?.selectedQuestion ?? res.data.question;
+                    setCodingQuestion(q);
                 }
             } catch (err) {
-                console.error("Failed fetching dynamic hard tracking puzzle matrix:", err);
+                toast.error(toApiError(err).message);
             }
         });
+
+        socketRef.current.on('error-alert', (e) => toast.error(e?.msg || 'Voice service error'));
 
         return () => {
             if (streamerRef.current) streamerRef.current.stopAudioPipeline();
@@ -95,12 +96,11 @@ export default function TechnicalRoundWorkspace({ sessionId, roundId, simliSessi
 
             if (res.data.success) {
                 setEvaluationResult(res.data);
-                // System automatically compiles report cards on backend and routes home
-                alert("Coding challenge verified successfully via compiler metrics schemas!");
+                toast.success("Technical round submitted");
+                setTimeout(() => onComplete?.(), 2500);
             }
         } catch (err) {
-            console.error("Submission verification flow crash trace:", err);
-            alert("Execution Timeout or Sandbox validation loop parameters error.");
+            toast.error(toApiError(err).message);
         } finally {
             setIsSubmittingCode(false);
         }

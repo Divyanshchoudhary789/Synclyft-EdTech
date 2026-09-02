@@ -1,5 +1,6 @@
 "use client";
 
+import toast from "react-hot-toast";
 import { useState, useRef, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -10,13 +11,16 @@ import { Upload, Check, Link as LinkIcon, ArrowRight, Plus, X, Copy } from "luci
 import { Logo } from "@synclyft/ui/components/Logo";
 import { Button } from "@synclyft/ui/components/Button";
 import { api } from "@synclyft/lib/api";
-import {useAuthStore} from "@synclyft/lib/store/auth";
+import { useAuthStore } from "@synclyft/lib/store/auth";
+import { useStudentProfile } from "@synclyft/lib/api/hooks";
 
 const PLATFORMS = [
   { id: "leetcode", label: "LeetCode", color: "#0062FF" },
   { id: "github", label: "GitHub", color: "#4D7CFF" },
-  { id: "codechef", label: "CodeChef", color: "#0062FF" },
+  { id: "codeforces", label: "Codeforces", color: "#0062FF" },
+  { id: "hackerrank", label: "HackerRank", color: "#3DDC84" },
 ];
+type Platform = (typeof PLATFORMS)[number];
 
 const STEPS = [
   { id: 1, label: "Profile" },
@@ -25,24 +29,39 @@ const STEPS = [
   { id: 4, label: "Preferences" },
 ];
 
+const QUICK_LANGS = ["Python", "Java", "C++", "JavaScript", "TypeScript", "Go", "Rust", "Swift", "Ruby", "PHP"];
+
 const profileSchema = z.object({
-  branch: z.string().min(1),
+  branch: z.string().min(1, "Branch is required"),
   graduationYear: z.string(),
   preferredInterviewLanguage: z.string(),
   bio: z.string().optional(),
-  cgpa: z.string().min(1),
-  attendance: z.string().min(1),
+  cgpa: z.string().min(1, "CGPA is required"),
+  attendance: z.string().min(1, "Attendance is required"),
 });
-
 type ProfileForm = z.infer<typeof profileSchema>;
+
+const fieldStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "9px 12px",
+  fontSize: "14px",
+  borderRadius: "10px",
+  outline: "none",
+  border: "1px solid var(--th-input-border)",
+  backgroundColor: "var(--th-input-bg)",
+  color: "var(--th-text-primary)",
+};
 
 export default function OnboardingPage() {
   const router = useRouter();
+  const { fetchUser } = useAuthStore();
+  const { data: existing } = useStudentProfile();
+
   const [step, setStep] = useState(1);
-  const [skills, setSkills] = useState<string[]>(["Python", "React"]);
+  const [skills, setSkills] = useState<string[]>([]);
   const [newSkill, setNewSkill] = useState("");
   const [connectedPlatforms, setConnectedPlatforms] = useState<string[]>([]);
-  const [uploadedFile, setUploadedFile] = useState<any | null>(null);
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [targetRole, setTargetRole] = useState("SDE-1");
   const [expectedCTC, setExpectedCTC] = useState("");
   const [projects, setProjects] = useState<Array<{ title: string; description: string; githubLink?: string; liveLink?: string }>>([]);
@@ -50,225 +69,170 @@ export default function OnboardingPage() {
   const [projectDesc, setProjectDesc] = useState("");
   const [projectGithub, setProjectGithub] = useState("");
   const [projectLive, setProjectLive] = useState("");
-  const [codingLanguageChoices, setCodingLanguageChoices] = useState<string[]>(["Python", "JavaScript"]);
+  const [codingLanguageChoices, setCodingLanguageChoices] = useState<string[]>([]);
   const [newLanguage, setNewLanguage] = useState("");
-  const [interviewTimeline, setInterviewTimeline] = useState("Within 1 month");
   const [submitting, setSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { fetchUser } = useAuthStore();
+  const prefilled = useRef(false);
 
-  // Platform Verification States
+  // Platform verification modal
   const [showVerifyModal, setShowVerifyModal] = useState(false);
-  const [verificationPlatform, setVerificationPlatform] = useState<any | null>(null);
+  const [verificationPlatform, setVerificationPlatform] = useState<Platform | null>(null);
   const [platformUsername, setPlatformUsername] = useState("");
   const [verificationToken, setVerificationToken] = useState<string | null>(null);
   const [isInitiating, setIsInitiating] = useState(false);
   const [isVerifyingPlat, setIsVerifyingPlat] = useState(false);
-  const [verifiedPlatforms, setVerifiedPlatforms] = useState<string[]>([]);
 
-  const handleAddSkill = () => {
-    if (newSkill.trim() && !skills.includes(newSkill.trim())) {
-      setSkills((prev) => [...prev, newSkill.trim()]);
-      setNewSkill("");
-    }
-  };
-
-  const handleRemoveSkill = (skill: string) => {
-    setSkills((prev) => prev.filter((s) => s !== skill));
-  };
-
-  const { register, trigger, getValues, formState: { errors } } = useForm<ProfileForm>({
+  const { register, trigger, getValues, reset, formState: { errors } } = useForm<ProfileForm>({
     resolver: zodResolver(profileSchema),
+    defaultValues: {
+      graduationYear: "2026",
+      preferredInterviewLanguage: "English",
+    },
   });
 
+  useEffect(() => {
+    (async () => {
+      const u = await fetchUser();
+      if (!u) router.push("/login");
+    })();
+  }, [fetchUser, router]);
 
+  // Prefill from any profile data that already exists (returning users).
+  useEffect(() => {
+    if (prefilled.current || !existing) return;
+    const p = existing as unknown as Record<string, unknown>;
+    prefilled.current = true;
+    reset({
+      branch: (p.branch as string) || "",
+      graduationYear: p.graduationYear ? String(p.graduationYear) : "2026",
+      preferredInterviewLanguage: (p.preferredInterviewLanguage as string) || "English",
+      bio: (p.bio as string) || "",
+      cgpa: p.cgpa != null ? String(p.cgpa) : "",
+      attendance: p.attendance != null ? String(p.attendance) : "",
+    });
+    if (Array.isArray(p.skills) && p.skills.length) setSkills(p.skills as string[]);
+    if (Array.isArray(p.projects) && p.projects.length) setProjects(p.projects as typeof projects);
+    if (Array.isArray(p.codingLanguageChoices) && p.codingLanguageChoices.length)
+      setCodingLanguageChoices(p.codingLanguageChoices as string[]);
+    if (p.targetRole) setTargetRole(p.targetRole as string);
+    const ctc = p.expectedCTC as { min?: number } | undefined;
+    if (ctc?.min) setExpectedCTC(String(Math.round(ctc.min / 100000)));
+  }, [existing, reset]);
 
-     useEffect(() => {
-        const getCurrentUser = async () => {
-          const userData = await fetchUser();
-          console.log(`User ${JSON.stringify(userData)}`)
-          if (!userData) {
-            router.push("/login");
-          }
-        };
-    
-        getCurrentUser();
-      }, [fetchUser, router]);
+  const addSkill = () => {
+    const v = newSkill.trim();
+    if (v && !skills.includes(v)) setSkills((s) => [...s, v]);
+    setNewSkill("");
+  };
+  const addLanguage = (v: string) => {
+    const t = v.trim();
+    if (t && !codingLanguageChoices.includes(t)) setCodingLanguageChoices((l) => [...l, t]);
+    setNewLanguage("");
+  };
 
-  const handleStartVerification = (platform: any) => {
+  const startVerification = (platform: Platform) => {
     setVerificationPlatform(platform);
     setPlatformUsername("");
     setVerificationToken(null);
     setShowVerifyModal(true);
   };
 
-  const handleInitiateVerification = async (e: React.FormEvent) => {
+  const initiateVerification = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!platformUsername.trim()) return;
+    if (!platformUsername.trim() || !verificationPlatform) return;
     setIsInitiating(true);
     try {
-      const res = await api.post("profile/initiate", {
+      const res = await api.post("/profile/initiate", {
         username: platformUsername.trim(),
-        platform: verificationPlatform.id
+        platform: verificationPlatform.id,
       });
-      console.log("Initiate response:", res.data);
-      const token = res.data.token || res.data.verificationToken || res.data.verificationCode || res.data || "Verification-Token-123456";
+      const token = res.data.token || res.data.verificationToken || res.data.verificationCode || "";
+      if (!token) throw new Error("No verification token returned");
       setVerificationToken(token);
     } catch (err) {
-      console.error("Failed to initiate verification:", err);
-      setVerificationToken(`synclyft-verification-${verificationPlatform.id}-xyz`);
+      toast.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message || "Couldn't start verification. Check the username.");
     } finally {
       setIsInitiating(false);
     }
   };
 
-  const handleVerifyVerification = async () => {
+  const confirmVerification = async () => {
+    if (!verificationPlatform) return;
     setIsVerifyingPlat(true);
     try {
-      const res = await api.post("profile/verify", {
-        username: platformUsername.trim(),
-        platform: verificationPlatform.id
-      });
-      console.log("Verify response:", res.data);
-      setVerifiedPlatforms((prev) => [...prev, verificationPlatform.id]);
-      setConnectedPlatforms((prev) => [...prev, verificationPlatform.id]);
-      alert(`${verificationPlatform.label} verification successful!`);
+      await api.post("/profile/verify", { platform: verificationPlatform.id });
+      setConnectedPlatforms((prev) => [...new Set([...prev, verificationPlatform.id])]);
+      toast.success(`${verificationPlatform.label} verified`);
       setShowVerifyModal(false);
     } catch (err) {
-      console.error("Failed to verify platform:", err);
-      setVerifiedPlatforms((prev) => [...prev, verificationPlatform.id]);
-      setConnectedPlatforms((prev) => [...prev, verificationPlatform.id]);
-      alert(`${verificationPlatform.label} verification successful! (Local simulation fallback)`);
-      setShowVerifyModal(false);
+      toast.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message || `Couldn't verify ${verificationPlatform.label}. Make sure the token is in your bio.`);
     } finally {
       setIsVerifyingPlat(false);
     }
   };
 
-  const handleAddProject = () => {
-    if (projectTitle.trim() && projectDesc.trim()) {
-      setProjects((prev) => [
-        ...prev,
-        {
-          title: projectTitle.trim(),
-          description: projectDesc.trim(),
-          githubLink: projectGithub.trim() || "",
-          liveLink: projectLive.trim() || "",
-        },
-      ]);
-      setProjectTitle("");
-      setProjectDesc("");
-      setProjectGithub("");
-      setProjectLive("");
-    } else {
-      alert("Please provide both Title and Description for the project.");
+  const addProject = () => {
+    if (!projectTitle.trim() || !projectDesc.trim()) {
+      toast("Add both a title and description for the project.");
+      return;
     }
+    setProjects((prev) => [
+      ...prev,
+      { title: projectTitle.trim(), description: projectDesc.trim(), githubLink: projectGithub.trim() || "", liveLink: projectLive.trim() || "" },
+    ]);
+    setProjectTitle(""); setProjectDesc(""); setProjectGithub(""); setProjectLive("");
   };
 
-  const handleRemoveProject = (index: number) => {
-    setProjects((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const handleFileChange = (e : any) => {
-    const file = e.target.files[0];
-
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
     if (!file) return;
-
-    if (file.type !== "application/pdf") {
-      alert("Please select a PDF file.");
-      return;
-    }
-
-    if (file.size > 3 * 1024 * 1024) {
-      alert("File size must be less than 3 MB.");
-      return;
-    }
-
+    if (file.type !== "application/pdf") return toast("Please select a PDF file.");
+    if (file.size > 3 * 1024 * 1024) return toast("File must be under 3 MB.");
     setUploadedFile(file);
   };
 
   const handleNext = async () => {
     if (step === 1) {
-      const isValid = await trigger();
-      if (!isValid) {
-        alert("Please fill all mandatory profile fields correctly.");
-        return;
-      }
-      if (skills.length === 0) {
-        alert("Please add at least one skill.");
-        return;
-      }
+      if (!(await trigger())) return toast("Fill all required profile fields.");
+      if (skills.length === 0) return toast("Add at least one skill.");
     }
-    if (step === 2) {
-      if (!uploadedFile) {
-        alert("Please upload your PDF resume to continue.");
-        return;
-      }
-    }
-    if (step === 3) {
-      if (connectedPlatforms.length === 0) {
-        alert("Please connect at least one platform to continue.");
-        return;
-      }
-    }
+    if (step === 2 && !uploadedFile) return toast("Upload your PDF resume to continue.");
+    if (step === 3 && connectedPlatforms.length === 0) return toast("Verify at least one platform to continue.");
     if (step < 4) setStep((s) => s + 1);
   };
 
   const handleFinish = async () => {
-    if (!expectedCTC.trim()) {
-      alert("Please enter your Expected CTC.");
-      return;
-    }
-    if (projects.length === 0) {
-      alert("Please add at least one project.");
-      return;
-    }
-    if (codingLanguageChoices.length === 0) {
-      alert("Please add at least one coding language choice.");
-      return;
-    }
+    if (!expectedCTC.trim()) return toast("Enter your expected CTC.");
+    if (projects.length === 0) return toast("Add at least one project.");
+    if (codingLanguageChoices.length === 0) return toast("Add at least one coding language.");
 
-    const profileData = getValues();
-
-    const formData = new FormData();
-    formData.append("branch", profileData.branch);
-    formData.append("graduationYear", profileData.graduationYear);
-    formData.append("graduation year", profileData.graduationYear);
-    formData.append("targetRole", targetRole);
+    const data = getValues();
     const parsedMin = parseFloat(expectedCTC.replace(/[^0-9.]/g, "")) || 5;
     const minVal = parsedMin < 100 ? parsedMin * 100000 : parsedMin;
-    const maxVal = minVal * 2; 
-    formData.append("expectedCTC", JSON.stringify({ min: minVal, max: maxVal }));
-    formData.append("projects", JSON.stringify(projects));
-    formData.append("preferredInterviewLanguage", profileData.preferredInterviewLanguage);
-    formData.append("cgpa", profileData.cgpa);
-    formData.append("attendance", profileData.attendance);
-    
-    formData.append("codingLanguageChoices", JSON.stringify(codingLanguageChoices));
+    const maxVal = Math.round(minVal * 1.5);
 
-    if (uploadedFile) {
-      formData.append("resume", uploadedFile);
-    }
-
-    // Extra fields to ensure completeness
-    formData.append("bio", profileData.bio || "");
-    formData.append("skills", JSON.stringify(skills));
-    formData.append("interviewTimeline", interviewTimeline);
-
-    console.log("Onboarding payload FormData fields:");
-    formData.forEach((value, key) => {
-      console.log(key, value);
-    });
+    const fd = new FormData();
+    fd.append("branch", data.branch);
+    fd.append("graduationYear", data.graduationYear);
+    fd.append("targetRole", targetRole);
+    fd.append("expectedCTC", JSON.stringify({ min: minVal, max: maxVal }));
+    fd.append("projects", JSON.stringify(projects));
+    fd.append("preferredInterviewLanguage", data.preferredInterviewLanguage);
+    fd.append("cgpa", data.cgpa);
+    fd.append("attendance", data.attendance);
+    fd.append("codingLanguageChoices", JSON.stringify(codingLanguageChoices));
+    fd.append("skills", JSON.stringify(skills));
+    if (data.bio) fd.append("bio", data.bio);
+    if (uploadedFile) fd.append("resume", uploadedFile);
 
     setSubmitting(true);
     try {
-      const res = await api.post("/profile/add/profile-details", formData);
-      console.log("Onboarding response:", res);
+      await api.post("/profile/add/profile-details", fd);
+      toast.success("Profile completed");
       router.push("/dashboard");
     } catch (error) {
-      console.error("Onboarding submission failed:", error);
-      // Still redirect to dashboard even if onboarding save fails
-      router.push("/dashboard");
+      toast.error((error as { response?: { data?: { message?: string } } })?.response?.data?.message ?? "Couldn't save your profile. Check the fields and try again.");
     } finally {
       setSubmitting(false);
     }
@@ -277,303 +241,203 @@ export default function OnboardingPage() {
   const progress = ((step - 1) / (STEPS.length - 1)) * 100;
 
   return (
-    <div className="min-h-screen bg-var(--th-bg) flex flex-col" style={{ fontFamily: "var(--font-inter), sans-serif" }}>
-      {/* Static pulse progress line */}
-      <div className="w-full h-[2px] bg-var(--th-border) relative">
-        <div
-          className="absolute top-0 left-0 h-full bg-var(--th-primary-main) transition-all duration-500"
-          style={{ width: `${progress}%` }}
-        />
+    <div className="flex min-h-screen flex-col" style={{ backgroundColor: "var(--th-bg)", color: "var(--th-text-primary)", fontFamily: "var(--font-inter), sans-serif" }}>
+      {/* progress bar */}
+      <div className="relative h-[3px] w-full" style={{ backgroundColor: "var(--th-border)" }}>
+        <div className="absolute left-0 top-0 h-full transition-all duration-500" style={{ width: `${progress}%`, backgroundColor: "var(--th-primary)" }} />
       </div>
 
-      {/* Nav */}
-      <nav className="flex items-center px-6 py-4 border-b border-var(--th-border-strong)">
+      {/* top nav */}
+      <nav className="flex flex-col gap-3 border-b px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6" style={{ borderColor: "var(--th-border)" }}>
         <Link href="/" className="flex items-center gap-2">
-          <Logo size={28} />
-          <span className="font-semibold text-sm text-var(--th-text-main)" style={{ fontFamily: "var(--font-inter-tight), sans-serif" }}>
-            Synclyft AI
-          </span>
+          <Logo size={26} />
+          <span className="text-sm font-semibold" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>Synclyft AI</span>
         </Link>
-
-        {/* Steps indicator */}
-        <div className="flex items-center ml-40 gap-2">
-          {STEPS.map((s) => (
-            <div key={s.id} className="flex items-center gap-2">
-              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium transition-all ${step > s.id
-                ? "bg-[#3DDC84] text-[#0B0D10]"
-                : step === s.id
-                  ? "bg-[#0062FF] text-[#0B0D10]"
-                  : "bg-[#2A2F38] text-[#4A5260]"
-                }`}>
-                {step > s.id ? <Check size={12} /> : s.id}
+        {/* stepper */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:gap-2 sm:pb-0">
+          {STEPS.map((s, i) => {
+            const done = step > s.id;
+            const active = step === s.id;
+            return (
+              <div key={s.id} className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+                <span
+                  className="flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold"
+                  style={{
+                    backgroundColor: done ? "#3DDC84" : active ? "var(--th-primary)" : "var(--th-bg-secondary)",
+                    color: done || active ? "#fff" : "var(--th-text-faint)",
+                    border: `1px solid ${done ? "#3DDC84" : active ? "var(--th-primary)" : "var(--th-border)"}`,
+                  }}
+                >
+                  {done ? <Check size={12} /> : s.id}
+                </span>
+                <span className="hidden text-xs font-medium sm:block" style={{ color: active ? "var(--th-text-primary)" : "var(--th-text-faint)" }}>
+                  {s.label}
+                </span>
+                {i < STEPS.length - 1 && <span className="hidden h-px w-6 sm:block" style={{ backgroundColor: done ? "#3DDC84" : "var(--th-border)" }} />}
               </div>
-              <span className={`text-xs hidden sm:block ${step === s.id ? "text-[#C8CDD5]" : "text-[#4A5260]"}`}>
-                {s.label}
-              </span>
-              {s.id < STEPS.length && (
-                <div className={`w-8 h-px hidden sm:block ${step > s.id ? "bg-[#3DDC84]" : "bg-[#2A2F38]"}`} />
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       </nav>
 
-      {/* Content */}
-      <div className="flex-1 flex items-center justify-center px-4 py-12 bg-gradient-to-b from-transparent to-[rgba(0,98,255,0.02)]">
-        <div className="w-full max-w-xl space-y-8 p-8 md:p-10 rounded-2xl border shadow-xl relative overflow-hidden" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-blue-400" />
-          {/* Step 1: Profile */}
+      {/* content */}
+      <div className="flex flex-1 items-start justify-center px-4 py-8 sm:items-center sm:py-12">
+        <div
+          className="relative w-full max-w-xl space-y-6 overflow-hidden rounded-2xl border p-6 shadow-xl sm:p-8 md:p-10"
+          style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}
+        >
+          <div className="absolute left-0 top-0 h-1 w-full" style={{ background: "linear-gradient(90deg, var(--th-primary), #4D7CFF)" }} />
+
+          {/* STEP 1 — Profile */}
           {step === 1 && (
-            <div className="space-y-6">
+            <div className="space-y-5">
               <div>
-                <h2 className="text-2xl font-bold text-var(--th-text-main) tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif" }}>
-                  Set up your profile
-                </h2>
-                <p className="text-var(--th-text-muted) text-sm mt-1">This helps Synclyft calibrate your interview experience precisely.</p>
+                <h2 className="text-2xl font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>Set up your profile</h2>
+                <p className="mt-1 text-sm" style={{ color: "var(--th-text-muted)" }}>This helps Synclyft calibrate your interview experience precisely.</p>
               </div>
 
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="label-caption">Graduation year</label>
-                    <select {...register("graduationYear")} className="input-dark" style={
-                      { backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-input-border)", color: "var(--th-text-primary)" }
-                    }>
-                      {[2024, 2025, 2026, 2027].map((y) => (
-                        <option key={y} value={y} style={{ background: "var(--th-input-bg)", color: "var(--th-text-primary)" }}>{y}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="label-caption">Interview Language</label>
-                    <select {...register("preferredInterviewLanguage")} className="input-dark" style={{
-                      backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-input-border)",
-                      color: "var(--th-text-primary)"
-                    }}>
-                      {["English", "Hindi", "HinEnglish"].map((l) => (
-                        <option key={l} value={l} style={{ backgroundColor: "var(--th-input-bg)", color: "var(--th-text-main)" }}>{l}</option>
-                      ))}
-                    </select>
-                  </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <label className="label-caption">Graduation year</label>
+                  <select {...register("graduationYear")} style={fieldStyle}>
+                    {[2024, 2025, 2026, 2027, 2028].map((y) => <option key={y} value={y}>{y}</option>)}
+                  </select>
                 </div>
-                 <div className="space-y-1.5">
-                    <label className="label-caption">Branch / Specialization</label>
-                    <input {...register("branch")} className="input-dark" placeholder="e.g. Computer Science"
-                      style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-input-border)", color: "var(--th-text-primary)" }} required />
-                  </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="label-caption">CGPA</label>
-                    <input {...register("cgpa")} className="input-dark" placeholder="e.g. 8.5"
-                      style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-input-border)", color: "var(--th-text-primary)" }} required />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="label-caption">Attendance (%)</label>
-                    <input {...register("attendance")} className="input-dark" placeholder="e.g. 85"
-                      style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-input-border)", color: "var(--th-text-primary)" }} required />
-                  </div>
+                <div className="space-y-1.5">
+                  <label className="label-caption">Interview language</label>
+                  <select {...register("preferredInterviewLanguage")} style={fieldStyle}>
+                    {["English", "Hindi", "HinEnglish"].map((l) => <option key={l} value={l}>{l}</option>)}
+                  </select>
                 </div>
+              </div>
 
-                {/* Skills */}
-                <div className="space-y-2">
-                  <label className="label-caption">Skills</label>
-                  <div className="flex flex-wrap gap-2 mb-2">
+              <div className="space-y-1.5">
+                <label className="label-caption">Branch / Specialization</label>
+                <input {...register("branch")} style={fieldStyle} placeholder="e.g. Computer Science" />
+                {errors.branch && <p className="text-xs text-[#FF5C5C]">{errors.branch.message}</p>}
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <label className="label-caption">CGPA</label>
+                  <input {...register("cgpa")} style={fieldStyle} placeholder="e.g. 8.5" />
+                  {errors.cgpa && <p className="text-xs text-[#FF5C5C]">{errors.cgpa.message}</p>}
+                </div>
+                <div className="space-y-1.5">
+                  <label className="label-caption">Attendance (%)</label>
+                  <input {...register("attendance")} style={fieldStyle} placeholder="e.g. 85" />
+                  {errors.attendance && <p className="text-xs text-[#FF5C5C]">{errors.attendance.message}</p>}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="label-caption">Skills</label>
+                {skills.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
                     {skills.map((skill) => (
-                      <span
-                        key={skill}
-                        className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium"
-                        style={{ backgroundColor: "rgba(0, 98, 255, 0.12)", color: "var(--th-text-main)", border: "1px solid rgba(0, 98, 255, 0.2)" }}
-                      >
+                      <span key={skill} className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium"
+                        style={{ backgroundColor: "color-mix(in srgb, var(--th-primary) 12%, transparent)", color: "var(--th-primary)", border: "1px solid color-mix(in srgb, var(--th-primary) 25%, transparent)" }}>
                         {skill}
-                        <button type="button" onClick={() => handleRemoveSkill(skill)} className="hover:opacity-70">
-                          <X size={10} />
-                        </button>
+                        <button type="button" onClick={() => setSkills((s) => s.filter((x) => x !== skill))} className="hover:opacity-70"><X size={10} /></button>
                       </span>
                     ))}
                   </div>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={newSkill}
-                      onChange={(e) => setNewSkill(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          handleAddSkill();
-                        }
-                      }}
-                      className="input-dark flex-1"
-                      placeholder="Add a skill (e.g. Python, React)..."
-                      style={{
-                        backgroundColor: "var(--th-input-bg)",
-                        borderColor: "var(--th-input-border)",
-                        color: "var(--th-text-main)",
-                        borderWidth: "1px",
-                        borderStyle: "solid",
-                        borderRadius: "4px",
-                        padding: "8px 12px",
-                        outline: "none",
-                        fontSize: "14px",
-                      }}
-                    />
-                    <Button type="button" variant="secondary" size="sm" onClick={handleAddSkill} icon={<Plus size={12} className="text-[var(--th-text-primary)]" />}>
-                      Add
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="label-caption">Short bio (optional)</label>
-                  <textarea {...register("bio")} className="input-dark h-20 resize-none" placeholder="A sentence about your focus areas..."
-                    style={{
-                      backgroundColor: "var(--th-input-bg)"
-                    }}
+                )}
+                <div className="flex gap-2">
+                  <input
+                    value={newSkill}
+                    onChange={(e) => setNewSkill(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addSkill(); } }}
+                    style={{ ...fieldStyle, flex: 1 }}
+                    placeholder="Add a skill (e.g. Python, React)…"
                   />
+                  <Button type="button" variant="secondary" size="sm" onClick={addSkill} icon={<Plus size={12} />}>Add</Button>
                 </div>
               </div>
 
-              <Button onClick={handleNext} className="w-full justify-center" iconRight={<ArrowRight size={14} />}>
-                Continue
-              </Button>
+              <div className="space-y-1.5">
+                <label className="label-caption">Short bio (optional)</label>
+                <textarea {...register("bio")} style={{ ...fieldStyle, height: 80, resize: "none" }} placeholder="A sentence about your focus areas…" />
+              </div>
+
+              <Button onClick={handleNext} className="w-full justify-center" iconRight={<ArrowRight size={14} />}>Continue</Button>
             </div>
           )}
 
-          {/* Step 2: Resume */}
+          {/* STEP 2 — Resume */}
           {step === 2 && (
-            <div className="space-y-6">
+            <div className="space-y-5">
               <div>
-                <h2
-                  className="text-2xl font-bold tracking-tight"
-                  style={{
-                    color: "var(--th-text-primary)",
-                    fontFamily: "var(--font-inter-tight), sans-serif",
-                  }}
-                >
-                  Upload your resume
-                </h2>
-
-                <p
-                  className="text-sm mt-1"
-                  style={{ color: "var(--th-text-main)" }}
-                >
-                  Synclyft parses your resume to extract skills, experience, and match it
-                  against job descriptions.
-                </p>
+                <h2 className="text-2xl font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>Upload your resume</h2>
+                <p className="mt-1 text-sm" style={{ color: "var(--th-text-muted)" }}>Synclyft parses your resume to extract skills and experience and match it against job descriptions.</p>
               </div>
 
-              {/* Hidden File Input */}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf"
-                className="hidden"
-                onChange={handleFileChange}
-              />
+              <input ref={fileInputRef} type="file" accept=".pdf" className="hidden" onChange={handleFileChange} />
 
-              {/* Upload Box */}
-              <div
+              <button
+                type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className={`border-2 border-dashed rounded-lg p-10 text-center cursor-pointer transition-all duration-200 ${uploadedFile
-                    ? "border-[#3DDC84] bg-[rgba(61,220,132,0.05)]"
-                    : "border-[#2A2F38] hover:border-[#0062FF] hover:bg-[rgba(0,98,255,0.05)]"
-                  }`}
+                className="w-full rounded-xl border-2 border-dashed p-10 text-center transition-colors"
+                style={{
+                  borderColor: uploadedFile ? "#3DDC84" : "var(--th-border-strong)",
+                  backgroundColor: uploadedFile ? "rgba(61,220,132,0.06)" : "transparent",
+                }}
               >
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full"
+                  style={{ backgroundColor: uploadedFile ? "rgba(61,220,132,0.14)" : "var(--th-bg-secondary)" }}>
+                  {uploadedFile ? <Check size={22} className="text-[#3DDC84]" /> : <Upload size={22} style={{ color: "var(--th-text-muted)" }} />}
+                </div>
                 {uploadedFile ? (
-                  <div className="space-y-3">
-                    <div className="w-12 h-12 rounded-full bg-[rgba(61,220,132,0.12)] flex items-center justify-center mx-auto">
-                      <Check size={22} className="text-[#3DDC84]" />
-                    </div>
-
-                    <div>
-                      <p className="font-medium text-[#3DDC84]">
-                        {uploadedFile.name}
-                      </p>
-
-                      <p className="text-xs text-gray-400 mt-1">
-                        {(uploadedFile.size / 1024 / 1024).toFixed(2)} MB
-                      </p>
-
-                      <p className="text-xs text-blue-500 mt-2">
-                        Click to choose another file
-                      </p>
-                    </div>
-                  </div>
+                  <>
+                    <p className="text-sm font-medium text-[#3DDC84]">{uploadedFile.name}</p>
+                    <p className="mt-1 text-xs" style={{ color: "var(--th-text-faint)" }}>{(uploadedFile.size / 1024 / 1024).toFixed(2)} MB · click to replace</p>
+                  </>
                 ) : (
-                  <div className="space-y-3">
-                    <div className="w-12 h-12 rounded-full bg-[#1B1F26] flex items-center justify-center mx-auto">
-                      <Upload size={22} className="text-[#4A5260]" />
-                    </div>
-
-                    <div>
-                      <p
-                        className="text-sm"
-                        style={{ color: "var(--th-text-primary)" }}
-                      >
-                        Click to upload your resume
-                      </p>
-
-                      <p
-                        className="text-xs mt-1"
-                        style={{ color: "var(--th-text-main)" }}
-                      >
-                        PDF only • Max 3 MB
-                      </p>
-                    </div>
-                  </div>
+                  <>
+                    <p className="text-sm" style={{ color: "var(--th-text-primary)" }}>Click to upload your resume</p>
+                    <p className="mt-1 text-xs" style={{ color: "var(--th-text-muted)" }}>PDF only · max 3 MB</p>
+                  </>
                 )}
-              </div>
+              </button>
 
               <div className="flex gap-3">
-                <Button variant="secondary" onClick={() => setStep(1)}>
-                  ← Back
-                </Button>
-
-                <Button
-                  onClick={handleNext}
-                  className="flex-1 justify-center"
-                  iconRight={<ArrowRight size={14} />}
-                  disabled={!uploadedFile}
-                >
-                  Continue
-                </Button>
+                <Button variant="secondary" onClick={() => setStep(1)}>← Back</Button>
+                <Button onClick={handleNext} className="flex-1 justify-center" iconRight={<ArrowRight size={14} />} disabled={!uploadedFile}>Continue</Button>
               </div>
             </div>
           )}
 
-          {/* Step 3: Platform linking */}
+          {/* STEP 3 — Platforms */}
           {step === 3 && (
-            <div className="space-y-6">
+            <div className="space-y-5">
               <div>
-                <h2 className="text-2xl font-bold text-[#E8EAF0] tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif" }}>
-                  Link your platforms
-                </h2>
-                <p className="text-[#6B7280] text-sm mt-1">Connect your coding profiles to get a unified readiness score.</p>
+                <h2 className="text-2xl font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>Link your platforms</h2>
+                <p className="mt-1 text-sm" style={{ color: "var(--th-text-muted)" }}>Connect your coding profiles to get a unified readiness score.</p>
               </div>
 
               <div className="space-y-3">
                 {PLATFORMS.map((platform) => {
                   const connected = connectedPlatforms.includes(platform.id);
                   return (
-                    <div key={platform.id} className="flex items-center justify-between p-4 card-dark" style={{ backgroundColor: "var(--th-card-bg)" }}>
+                    <div key={platform.id} className="flex items-center justify-between rounded-xl border p-4"
+                      style={{ backgroundColor: "var(--th-card-bg-alt)", borderColor: "var(--th-card-border)" }}>
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded flex items-center justify-center" style={{ backgroundColor: platform.color + "18" }}>
+                        <span className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ backgroundColor: platform.color + "1a" }}>
                           <LinkIcon size={14} style={{ color: platform.color }} />
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-[#C8CDD5]">{platform.label}</p>
-                          {connected && <p className="text-xs font-mono text-[#6B7280]">@arjun_m</p>}
-                        </div>
+                        </span>
+                        <p className="text-sm font-medium" style={{ color: "var(--th-text-primary)" }}>{platform.label}</p>
                       </div>
                       <button
-                        onClick={() => handleStartVerification(platform)}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-all ${connected
-                          ? "bg-[rgba(61,220,132,0.1)] text-[#3DDC84] border border-[rgba(61,220,132,0.2)] cursor-default"
-                          : "bg-[#0062FF] hover:bg-[#004BE6] text-white hover:text-white"
-                          }`}
+                        onClick={() => startVerification(platform)}
                         disabled={connected}
+                        className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors disabled:cursor-default"
+                        style={
+                          connected
+                            ? { backgroundColor: "rgba(61,220,132,0.12)", color: "#3DDC84", border: "1px solid rgba(61,220,132,0.25)" }
+                            : { backgroundColor: "var(--th-primary)", color: "#fff" }
+                        }
                       >
-                        {connected ? <><Check size={11} /> Verified</> : "Initiate Verification"}
+                        {connected ? <><Check size={11} /> Verified</> : "Verify"}
                       </button>
                     </div>
                   );
@@ -582,339 +446,159 @@ export default function OnboardingPage() {
 
               <div className="flex gap-3">
                 <Button variant="secondary" onClick={() => setStep(2)}>← Back</Button>
-                <Button
-                  onClick={handleNext}
-                  className="flex-1 justify-center"
-                  iconRight={<ArrowRight size={14} />}
-                  disabled={connectedPlatforms.length === 0}
-                >
-                  Continue
-                </Button>
+                <Button onClick={handleNext} className="flex-1 justify-center" iconRight={<ArrowRight size={14} />} disabled={connectedPlatforms.length === 0}>Continue</Button>
               </div>
             </div>
           )}
 
-          {/* Step 4: Preferences */}
+          {/* STEP 4 — Preferences */}
           {step === 4 && (
-            <div className="space-y-6">
+            <div className="space-y-5">
               <div>
-                <h2 className="text-2xl font-bold text-[var(--th-text-primary)] tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif" }}>
-                  Interview preferences
-                </h2>
-                <p className="text-[var(--th-text-secondary)] text-sm mt-1">Tell Synclyft AI what you&apos;re targeting so it can calibrate your sessions.</p>
+                <h2 className="text-2xl font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>Interview preferences</h2>
+                <p className="mt-1 text-sm" style={{ color: "var(--th-text-muted)" }}>Tell Synclyft AI what you&apos;re targeting so it can calibrate your sessions.</p>
               </div>
 
-              <div className="space-y-4">
-
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="label-caption">Target role</label>
-                    <select
-                      className="input-dark"
-                      style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-input-border)", color: "var(--th-text-primary)", fontFamily: "var(--font-inter-tight), sans-serif" }}
-                      value={targetRole}
-                      onChange={(e) => setTargetRole(e.target.value)}
-                    >
-                      {["SDE-1", "SDE-2", "ML Engineer", "Data Analyst", "Product Manager", "DevOps"].map((role) => (
-                        <option key={role} style={{ background: "var(--th-bg)", color: "var(--th-text-primary)", fontFamily: "var(--font-inter-tight), sans-serif" }}>{role}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="label-caption">Expected CTC</label>
-                    <input
-                      type="text"
-                      className="input-dark"
-                      placeholder="e.g. 12 LPA"
-                      value={expectedCTC}
-                      onChange={(e) => setExpectedCTC(e.target.value)}
-                      style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-input-border)", color: "var(--th-text-primary)" }}
-                      required
-                    />
-                  </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <label className="label-caption">Target role</label>
+                  <select style={fieldStyle} value={targetRole} onChange={(e) => setTargetRole(e.target.value)}>
+                    {["SDE-1", "SDE-2", "ML Engineer", "Data Analyst", "Product Manager", "DevOps"].map((r) => <option key={r} value={r}>{r}</option>)}
+                  </select>
                 </div>
+                <div className="space-y-1.5">
+                  <label className="label-caption">Expected CTC</label>
+                  <input style={fieldStyle} placeholder="e.g. 12 LPA" value={expectedCTC} onChange={(e) => setExpectedCTC(e.target.value)} />
+                </div>
+              </div>
 
-                <div className="space-y-4">
-                  <label className="label-caption">Projects</label>
-                  
-                  {/* Listed Projects */}
-                  {projects.length > 0 && (
-                    <div className="space-y-2">
-                      {projects.map((proj, idx) => (
-                        <div key={idx} className="flex items-start justify-between p-3 rounded-lg border border-[var(--th-border-strong)]" style={{ backgroundColor: "var(--th-card-bg)" }}>
-                          <div className="space-y-1">
-                            <p className="text-sm font-semibold text-[var(--th-text-primary)]">{proj.title}</p>
-                            <p className="text-xs text-[var(--th-text-main)]">{proj.description}</p>
-                            <div className="flex gap-3 text-[10px] text-blue-500 font-mono mt-1">
-                              {proj.githubLink && <a href={proj.githubLink} target="_blank" rel="noreferrer" className="hover:underline">GitHub</a>}
-                              {proj.liveLink && <a href={proj.liveLink} target="_blank" rel="noreferrer" className="hover:underline">Live Link</a>}
-                            </div>
+              <div className="space-y-3">
+                <label className="label-caption">Projects</label>
+                {projects.length > 0 && (
+                  <div className="space-y-2">
+                    {projects.map((proj, idx) => (
+                      <div key={idx} className="flex items-start justify-between rounded-lg border p-3"
+                        style={{ backgroundColor: "var(--th-card-bg-alt)", borderColor: "var(--th-card-border)" }}>
+                        <div className="min-w-0 space-y-1">
+                          <p className="text-sm font-semibold" style={{ color: "var(--th-text-primary)" }}>{proj.title}</p>
+                          <p className="text-xs" style={{ color: "var(--th-text-muted)" }}>{proj.description}</p>
+                          <div className="mt-1 flex gap-3 font-mono text-[10px]" style={{ color: "var(--th-primary)" }}>
+                            {proj.githubLink && <a href={proj.githubLink} target="_blank" rel="noreferrer" className="hover:underline">GitHub</a>}
+                            {proj.liveLink && <a href={proj.liveLink} target="_blank" rel="noreferrer" className="hover:underline">Live</a>}
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveProject(idx)}
-                            className="text-rose-500 hover:opacity-75"
-                          >
-                            <X size={14} />
-                          </button>
                         </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Add Project Form */}
-                  <div className="border border-dashed border-[#2A2F38] rounded-lg p-4 space-y-3">
-                    <p className="text-xs font-semibold text-[var(--th-text-secondary)]">Add a new project</p>
-                    <input
-                      type="text"
-                      className="input-dark"
-                      placeholder="Project Title"
-                      value={projectTitle}
-                      onChange={(e) => setProjectTitle(e.target.value)}
-                      style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-input-border)", color: "var(--th-text-primary)" }}
-                    />
-                    <textarea
-                      className="input-dark h-16 resize-none"
-                      placeholder="Project Description"
-                      value={projectDesc}
-                      onChange={(e) => setProjectDesc(e.target.value)}
-                      style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-input-border)", color: "var(--th-text-primary)" }}
-                    />
-                    <div className="grid grid-cols-2 gap-2">
-                      <input
-                        type="url"
-                        className="input-dark"
-                        placeholder="GitHub Link (optional)"
-                        value={projectGithub}
-                        onChange={(e) => setProjectGithub(e.target.value)}
-                        style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-input-border)", color: "var(--th-text-primary)", fontSize: "12px" }}
-                      />
-                      <input
-                        type="url"
-                        className="input-dark"
-                        placeholder="Live Link (optional)"
-                        value={projectLive}
-                        onChange={(e) => setProjectLive(e.target.value)}
-                        style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-input-border)", color: "var(--th-text-primary)", fontSize: "12px" }}
-                      />
-                    </div>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={handleAddProject}
-                      className="w-full justify-center"
-                    >
-                      Add Project
-                    </Button>
+                        <button type="button" onClick={() => setProjects((prev) => prev.filter((_, i) => i !== idx))} className="text-rose-500 hover:opacity-75"><X size={14} /></button>
+                      </div>
+                    ))}
                   </div>
+                )}
+                <div className="space-y-3 rounded-lg border border-dashed p-4" style={{ borderColor: "var(--th-border-strong)" }}>
+                  <p className="text-xs font-semibold" style={{ color: "var(--th-text-secondary)" }}>Add a project</p>
+                  <input style={fieldStyle} placeholder="Project title" value={projectTitle} onChange={(e) => setProjectTitle(e.target.value)} />
+                  <textarea style={{ ...fieldStyle, height: 64, resize: "none" }} placeholder="Project description" value={projectDesc} onChange={(e) => setProjectDesc(e.target.value)} />
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <input style={{ ...fieldStyle, fontSize: 12 }} placeholder="GitHub link (optional)" value={projectGithub} onChange={(e) => setProjectGithub(e.target.value)} />
+                    <input style={{ ...fieldStyle, fontSize: 12 }} placeholder="Live link (optional)" value={projectLive} onChange={(e) => setProjectLive(e.target.value)} />
+                  </div>
+                  <Button type="button" variant="secondary" size="sm" onClick={addProject} className="w-full justify-center">Add project</Button>
                 </div>
+              </div>
 
-                <div className="space-y-3">
-                  <label className="label-caption">Coding language choices</label>
-                  
-                  {/* Selected languages */}
-                  <div className="flex flex-wrap gap-2 mb-1">
+              <div className="space-y-3">
+                <label className="label-caption">Coding languages</label>
+                {codingLanguageChoices.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
                     {codingLanguageChoices.map((lang) => (
-                      <span
-                        key={lang}
-                        className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[rgba(0,98,255,0.12)] text-[#0062FF] border border-[rgba(0,98,255,0.2)]"
-                      >
+                      <span key={lang} className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold"
+                        style={{ backgroundColor: "color-mix(in srgb, var(--th-primary) 12%, transparent)", color: "var(--th-primary)", border: "1px solid color-mix(in srgb, var(--th-primary) 25%, transparent)" }}>
                         {lang}
-                        <button
-                          type="button"
-                          onClick={() => setCodingLanguageChoices((prev) => prev.filter((p) => p !== lang))}
-                          className="hover:opacity-75 text-rose-500"
-                        >
-                          <X size={10} />
-                        </button>
+                        <button type="button" onClick={() => setCodingLanguageChoices((prev) => prev.filter((p) => p !== lang))} className="text-rose-500 hover:opacity-75"><X size={10} /></button>
                       </span>
                     ))}
                   </div>
-
-                  {/* Add language input */}
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      className="input-dark flex-1"
-                      placeholder="Type a coding language (e.g. Swift, Kotlin)..."
-                      value={newLanguage}
-                      onChange={(e) => setNewLanguage(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          const val = newLanguage.trim();
-                          if (val && !codingLanguageChoices.includes(val)) {
-                            setCodingLanguageChoices((prev) => [...prev, val]);
-                            setNewLanguage("");
-                          }
-                        }
-                      }}
-                      style={{
-                        backgroundColor: "var(--th-input-bg)",
-                        borderColor: "var(--th-input-border)",
-                        color: "var(--th-text-main)",
-                        borderWidth: "1px",
-                        borderStyle: "solid",
-                        borderRadius: "4px",
-                        padding: "8px 12px",
-                        outline: "none",
-                        fontSize: "14px",
-                      }}
-                    />
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => {
-                        const val = newLanguage.trim();
-                        if (val && !codingLanguageChoices.includes(val)) {
-                          setCodingLanguageChoices((prev) => [...prev, val]);
-                          setNewLanguage("");
-                        }
-                      }}
-                    >
-                      Add
-                    </Button>
-                  </div>
-
-                  {/* Quick selections */}
-                  <div className="flex flex-wrap gap-1.5 pt-1 bg-var(--th-bg) text-var(--th-text-primary)">
-                    {["Python", "Java", "C++", "JavaScript", "TypeScript", "Go", "Rust", "Swift", "Ruby", "PHP"].map((lang) => {
-                      const selected = codingLanguageChoices.includes(lang);
-                      if (selected) return null;
-                      return (
-                        <button
-                          key={lang}
-                          type="button"
-                          onClick={() => setCodingLanguageChoices((prev) => [...prev, lang])}
-                          className="px-2.5 py-0.5 rounded border border-[var(--th-input-border)] bg-[var(--th-bg)] text-[10px] text-var(--th-text-primary) hover:text-[#C8CDD5] bg-[#1B1F26] hover:border-[#4A5260] transition-all"
-                        >
-                          + {lang}
-                        </button>
-                      );
-                    })}
-                  </div>
+                )}
+                <div className="flex gap-2">
+                  <input
+                    style={{ ...fieldStyle, flex: 1 }}
+                    placeholder="Type a language (e.g. Kotlin)…"
+                    value={newLanguage}
+                    onChange={(e) => setNewLanguage(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addLanguage(newLanguage); } }}
+                  />
+                  <Button type="button" variant="secondary" size="sm" onClick={() => addLanguage(newLanguage)}>Add</Button>
                 </div>
-
-                <div className="space-y-1.5">
-                  <label className="label-caption">Interview timeline</label>
-                  <select
-                    className="input-dark"
-                    value={interviewTimeline}
-                    onChange={(e) => setInterviewTimeline(e.target.value)}
-                    style={{backgroundColor: "var(--th-bg)",
-                      color: "var(--th-text-primary)"
-                    }}
-                  >
-                    <option style={{ background: "var(--th-bg)",
-                      color: "var(--th-text-primary)"
-                     }}>Within 1 month</option>
-                    <option style={{ background: "var(--th-bg)",
-                      color: "var(--th-text-primary)" }}>1–3 months</option>
-                    <option style={{ background: "var(--th-bg)",
-                      color: "var(--th-text-primary)" }}>3–6 months</option>
-                  </select>
+                <div className="flex flex-wrap gap-1.5">
+                  {QUICK_LANGS.filter((l) => !codingLanguageChoices.includes(l)).map((lang) => (
+                    <button
+                      key={lang}
+                      type="button"
+                      onClick={() => setCodingLanguageChoices((prev) => [...prev, lang])}
+                      className="rounded border px-2.5 py-0.5 text-[10px] transition-colors hover:opacity-80"
+                      style={{ borderColor: "var(--th-input-border)", backgroundColor: "var(--th-bg-secondary)", color: "var(--th-text-secondary)" }}
+                    >
+                      + {lang}
+                    </button>
+                  ))}
                 </div>
               </div>
 
               <div className="flex gap-3">
                 <Button variant="secondary" onClick={() => setStep(3)}>← Back</Button>
-                <Button
-                  onClick={handleFinish}
-                  loading={submitting}
-                  className="flex-1 justify-center"
-                  iconRight={<ArrowRight size={14} />}
-                >
-                  Enter Synclyft AI
-                </Button>
+                <Button onClick={handleFinish} loading={submitting} className="flex-1 justify-center" iconRight={<ArrowRight size={14} />}>Enter Synclyft AI</Button>
               </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* ── PLATFORM VERIFICATION MODAL ── */}
+      {/* verification modal */}
       {showVerifyModal && verificationPlatform && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="w-full max-w-md p-6 rounded-2xl border space-y-5 shadow-2xl relative bg-[var(--th-card-bg)] border-[var(--th-card-border)] text-left">
-            <button
-              type="button"
-              onClick={() => setShowVerifyModal(false)}
-              className="absolute right-4 top-4 p-1 text-[var(--th-text-faint)] hover:text-[var(--th-text-primary)] transition-colors border-0 bg-transparent cursor-pointer"
-            >
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="relative w-full max-w-md space-y-5 rounded-2xl border p-6 text-left shadow-2xl"
+            style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
+            <button type="button" onClick={() => setShowVerifyModal(false)} className="absolute right-4 top-4 p-1 transition-colors hover:opacity-70" style={{ color: "var(--th-text-faint)" }}>
               <X size={18} />
             </button>
-
-            <div className="flex items-center gap-2.5 border-b pb-3 border-[var(--th-border)]">
-              <div className="w-7 h-7 rounded flex items-center justify-center" style={{ backgroundColor: verificationPlatform.color + "18" }}>
+            <div className="flex items-center gap-2.5 border-b pb-3" style={{ borderColor: "var(--th-border)" }}>
+              <span className="flex h-7 w-7 items-center justify-center rounded" style={{ backgroundColor: verificationPlatform.color + "1a" }}>
                 <LinkIcon size={14} style={{ color: verificationPlatform.color }} />
-              </div>
-              <h3 className="text-sm font-bold text-[var(--th-text-primary)]">Verify {verificationPlatform.label}</h3>
+              </span>
+              <h3 className="text-sm font-bold" style={{ color: "var(--th-text-primary)" }}>Verify {verificationPlatform.label}</h3>
             </div>
 
             {!verificationToken ? (
-              <form onSubmit={handleInitiateVerification} className="space-y-4">
-                <p className="text-xs text-[var(--th-text-secondary)] leading-relaxed">
-                  Please enter your username on {verificationPlatform.label} to initiate verification.
+              <form onSubmit={initiateVerification} className="space-y-4">
+                <p className="text-xs leading-relaxed" style={{ color: "var(--th-text-secondary)" }}>
+                  Enter your {verificationPlatform.label} username to begin.
                 </p>
                 <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-[var(--th-text-secondary)]">{verificationPlatform.label} Username</label>
-                  <input
-                    type="text"
-                    value={platformUsername}
-                    onChange={(e) => setPlatformUsername(e.target.value)}
-                    className="input-light !text-xs w-full"
-                    placeholder="e.g. my_username"
-                    required
-                    autoFocus
-                  />
+                  <label className="label-caption">{verificationPlatform.label} username</label>
+                  <input type="text" value={platformUsername} onChange={(e) => setPlatformUsername(e.target.value)} style={fieldStyle} placeholder="e.g. my_username" required autoFocus />
                 </div>
-                <div className="flex justify-end gap-2.5 pt-2">
-                  <Button type="button" variant="secondary" onClick={() => setShowVerifyModal(false)}>
-                    Cancel
-                  </Button>
-                  <Button type="submit" loading={isInitiating}>
-                    Initiate Verification
-                  </Button>
+                <div className="flex justify-end gap-2.5 pt-1">
+                  <Button type="button" variant="secondary" onClick={() => setShowVerifyModal(false)}>Cancel</Button>
+                  <Button type="submit" loading={isInitiating}>Get token</Button>
                 </div>
               </form>
             ) : (
               <div className="space-y-4">
-                <p className="text-xs text-[var(--th-text-secondary)] leading-relaxed">
-                  Add this token in your {verificationPlatform.label} profile section.
+                <p className="text-xs leading-relaxed" style={{ color: "var(--th-text-secondary)" }}>
+                  Add this token to your {verificationPlatform.label} profile bio, then confirm.
                 </p>
-                
-                <div className="flex items-center justify-between p-3 rounded-lg border border-[var(--th-input-border)] bg-[var(--th-bg)]">
-                  <code className="text-xs font-mono select-all break-all pr-2 text-[var(--th-text-primary)]">
-                    {verificationToken}
-                  </code>
+                <div className="flex items-center justify-between rounded-lg border p-3" style={{ borderColor: "var(--th-input-border)", backgroundColor: "var(--th-bg-secondary)" }}>
+                  <code className="select-all break-all pr-2 font-mono text-xs" style={{ color: "var(--th-text-primary)" }}>{verificationToken}</code>
                   <button
                     type="button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(verificationToken);
-                      alert("Token copied to clipboard!");
-                    }}
-                    className="flex items-center gap-1 px-2 py-1 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded transition-colors text-xs font-semibold text-blue-500 border border-blue-500/20 bg-blue-500/5 cursor-pointer shrink-0"
-                    title="Copy Token"
+                    onClick={() => { navigator.clipboard.writeText(verificationToken); toast("Token copied"); }}
+                    className="flex shrink-0 items-center gap-1 rounded border px-2 py-1 text-xs font-semibold"
+                    style={{ color: "var(--th-primary)", borderColor: "color-mix(in srgb, var(--th-primary) 20%, transparent)", backgroundColor: "color-mix(in srgb, var(--th-primary) 6%, transparent)" }}
                   >
-                    <Copy size={12} />
-                    <span>Copy</span>
+                    <Copy size={12} /> Copy
                   </button>
                 </div>
-
-                <p className="text-[10px] text-[var(--th-text-faint)] leading-relaxed">
-                  Once you have updated your profile with the token, click the Verify button below to finalize.
-                </p>
-
-                <div className="flex justify-end gap-2.5 pt-2">
-                  <Button type="button" variant="secondary" onClick={() => setVerificationToken(null)}>
-                    ← Back
-                  </Button>
-                  <Button onClick={handleVerifyVerification} loading={isVerifyingPlat}>
-                    Verify
-                  </Button>
+                <div className="flex justify-end gap-2.5 pt-1">
+                  <Button type="button" variant="secondary" onClick={() => setVerificationToken(null)}>← Back</Button>
+                  <Button onClick={confirmVerification} loading={isVerifyingPlat}>Confirm</Button>
                 </div>
               </div>
             )}

@@ -12,6 +12,12 @@ export default function OfficerLoginPage() {
         expectedRole="college-admin"
         redirectTo="/dashboard"
         registerHref="/register"
+        artTitle="Cohort readiness, at a glance."
+        artPoints={[
+          "Batch dashboards & per-student drill-downs",
+          "AI-generated placement readiness reports",
+          "Natural-language queries across your cohort",
+        ]}
       />
     </Suspense>
   );

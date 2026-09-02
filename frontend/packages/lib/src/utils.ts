@@ -37,6 +37,24 @@ export function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Humanises a backend planType like `student_pro` / `COLLEGE_SCALE`. */
+export function planLabel(planType?: string | null): string {
+  if (!planType) return "—";
+  return String(planType)
+    .replace(/[_-]+/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+export function formatMoney(n: number | undefined | null, currency = "INR"): string {
+  const v = Number(n ?? 0);
+  try {
+    return new Intl.NumberFormat("en-IN", { style: "currency", currency, maximumFractionDigits: 0 }).format(v);
+  } catch {
+    return `₹${v}`;
+  }
+}
+
 export function randomBetween(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }

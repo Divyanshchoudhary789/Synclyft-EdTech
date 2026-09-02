@@ -1,6 +1,51 @@
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const { MemoryStore } = require('express-rate-limit');
+const { RedisStore } = require('rate-limit-redis');
 const logger = require('../services/loggerService');
+const { client: redisClient } = require('../config/redis.js');
+const { frontendUrls } = require('../config/env.js');
+
+/**
+ * Rate-limit store that runs on per-instance memory until the shared Redis
+ * client is connected, then transparently switches to Redis so limits are
+ * consistent across horizontally-scaled instances (Render). Building the
+ * RedisStore lazily avoids the "client is closed" crash at boot.
+ */
+class HybridRateLimitStore {
+  constructor(prefix) {
+    this.prefix = prefix;
+    this.memory = new MemoryStore();
+    this.redis = null;
+    this.options = null;
+  }
+  init(options) {
+    this.options = options;
+    this.memory.init(options);
+  }
+  _active() {
+    if (!this.redis && redisClient && redisClient.isReady) {
+      try {
+        this.redis = new RedisStore({
+          prefix: `rl:${this.prefix}:`,
+          sendCommand: (...args) => redisClient.sendCommand(args),
+        });
+        this.redis.init(this.options);
+        logger.info(`[rate-limit] Redis store active for "${this.prefix}"`);
+      } catch (err) {
+        this.redis = null;
+        logger.warn(`[rate-limit] Redis store failed for "${this.prefix}": ${err.message}`);
+      }
+    }
+    return this.redis || this.memory;
+  }
+  increment(key) { return this._active().increment(key); }
+  decrement(key) { return this._active().decrement(key); }
+  resetKey(key) { return this._active().resetKey(key); }
+  resetAll() { return this.memory.resetAll && this.memory.resetAll(); }
+}
+
+const makeStore = (prefix) => new HybridRateLimitStore(prefix);
 
 const helmetMiddleware = helmet({
   contentSecurityPolicy: {
@@ -22,10 +67,11 @@ const helmetMiddleware = helmet({
 
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: 300,
   message: 'Too many requests, please try again later',
   standardHeaders: true,
   legacyHeaders: false,
+  store: makeStore('general'),
   // Payment gateways (Razorpay) retry webhooks; never throttle them or
   // activation can be delayed / dropped.
   skip: (req) => req.path.includes('/webhooks/')
@@ -36,29 +82,31 @@ const strictLimiter = rateLimit({
   max: 5,
   message: 'Too many attempts, please try again after 1 hour',
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
+  store: makeStore('strict')
 });
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: 10,
   message: 'Too many login attempts, please try again after 15 minutes',
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
+  store: makeStore('auth')
 });
 
 const getCorsOptions = () => {
   const isProd = process.env.NODE_ENV === 'production';
-  const extra = (process.env.CORS_ALLOWED_ORIGINS || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const parseList = (v) => String(v || '').split(',').map((s) => s.trim().replace(/\/+$/, '')).filter(Boolean);
+  const extra = parseList(process.env.CORS_ALLOWED_ORIGINS);
 
   const allowedOrigins = [
-    process.env.FRONTEND_URL,
+    // FRONTEND_URL may itself be a comma-separated list of app origins;
+    // config/env.js parses it into frontendUrls.
+    ...frontendUrls,
     ...extra,
     // Local dev origins are only trusted outside production.
-    ...(isProd ? [] : ['http://localhost:3000', 'http://localhost:5173']),
+    ...(isProd ? [] : ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:3002', 'http://localhost:5173']),
   ].filter(Boolean);
 
   return {
@@ -153,6 +201,7 @@ module.exports = {
   generalLimiter,
   strictLimiter,
   authLimiter,
+  makeStore,
   getCorsOptions,
   securityHeaders,
   limitInputLength,

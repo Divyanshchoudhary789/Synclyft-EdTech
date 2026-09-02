@@ -6,7 +6,7 @@ const authorizeRoles = require("../middlewares/authorizeRoles.js");
 const { validate } = require("../middlewares/validationMiddleware.js");
 const { superAdminSchemas, reportSchemas } = require("../utils/validationSchemas.js");
 
-const { getPendingCollegeAdmins, approveCollegeAdmin, rejectCollegeAdmin, getPlatformOverview, getOrganizations, updateOrganizationStatus, getAuditLogs, getAuditLogById, getAuditLogSummary, exportAuditLogs } = require("../controllers/superAdminController.js");
+const { getPendingCollegeAdmins, approveCollegeAdmin, rejectCollegeAdmin, getPlatformOverview, getOrganizations, updateOrganizationStatus, getAuditLogs, getAuditLogById, getAuditLogSummary, exportAuditLogs, getPlatformStudents, updateUserStatus } = require("../controllers/superAdminController.js");
 const { getSuperAdminAnalyticsOverview, getRiskTrendByCollege, getViolationAnalytics, getInterviewPerformanceHeatmap } = require("../controllers/analyticsController.js");
 
 
@@ -27,5 +27,7 @@ superAdminRouter.patch("/approve-college-admin/:id", validate(superAdminSchemas.
 superAdminRouter.patch("/reject-college-admin/:id", validate(superAdminSchemas.rejectCollegeAdmin, 'params'), rejectCollegeAdmin);
 superAdminRouter.get("/organizations", validate(superAdminSchemas.organizationQuery, 'query'), getOrganizations);
 superAdminRouter.patch("/organizations/:organizationId/status", validate(superAdminSchemas.organizationIdParam, 'params'), validate(superAdminSchemas.updateOrganizationStatus, 'body'), updateOrganizationStatus);
+superAdminRouter.get("/students", validate(reportSchemas.paginationSchema, 'query'), getPlatformStudents);
+superAdminRouter.patch("/users/:userId/status", validate(superAdminSchemas.userIdParam, 'params'), validate(superAdminSchemas.updateUserStatus, 'body'), updateUserStatus);
 
 module.exports = superAdminRouter;

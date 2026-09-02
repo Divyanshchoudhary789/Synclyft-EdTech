@@ -39,7 +39,7 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
 
   return (
     <div
-      className="flex min-h-screen"
+      className="flex min-h-screen flex-col md:flex-row"
       style={{
         backgroundColor: "var(--th-bg)",
         color: "var(--th-text-primary)",

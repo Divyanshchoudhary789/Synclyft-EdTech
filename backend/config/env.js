@@ -53,11 +53,23 @@ if (softMissing.length) {
     console.warn(`[env] Optional vars not set (related features degrade): ${softMissing.join(', ')}`);
 }
 
+// FRONTEND_URL is sometimes set to a comma-separated list of origins (student /
+// officer / admin apps). Normalise it: keep the FIRST entry as the canonical
+// single URL that every `process.env.FRONTEND_URL` consumer expects (OAuth
+// redirects, email links, payment callbacks), and expose the full list for CORS.
+const frontendUrls = String(process.env.FRONTEND_URL || 'http://localhost:3000')
+    .split(',')
+    .map((s) => s.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
+process.env.FRONTEND_URL = frontendUrls[0];
+
 module.exports = {
     isProd,
     isDev: process.env.NODE_ENV === 'development',
     isTest: process.env.NODE_ENV === 'test',
     port: Number(process.env.PORT) || 8080,
+    frontendUrl: frontendUrls[0],
+    frontendUrls,
     // DB names for the auxiliary connections used by the interview engine.
     codingDbName: process.env.CODING_DB_NAME || 'Synclyft-EdTech',
     aptitudeDbName: process.env.APTITUDE_DB_NAME || 'aptitude_platform',

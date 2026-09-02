@@ -212,47 +212,72 @@ const getStudents = async (req, res) => {
     return res.status(404).json({ success: false, message: 'College admin not found.' });
   }
 
-  const { page, limit, skip } = buildPagination(req.query);
-  const search = (req.query.search || '').trim();
+  const { page, limit } = buildPagination(req.query);
+  const search = (req.query.search || '').trim().toLowerCase();
   const branch = (req.query.branch || '').trim();
   const graduationYear = req.query.graduationYear ? Number(req.query.graduationYear) : null;
+  // sort: 'recent' (default) | 'readiness_desc' | 'readiness_asc' | 'name'
+  const sort = String(req.query.sort || 'recent');
+  const band = String(req.query.band || 'all'); // all | top | high | mid | risk
 
-  const userQuery = {
-    role: 'student',
-    organization: user.organization
-  };
+  // Build the full ordered roster in one pass (lightweight fields only), then
+  // filter + sort + paginate in memory. Correct global sort/search across the
+  // whole cohort, and still cheap for realistic college sizes.
+  const students = await User.find({ role: 'student', organization: user.organization })
+    .select('name email status isEmailVerified createdAt')
+    .lean();
 
-  if (search) {
-    userQuery.$or = [
-      { name: { $regex: search, $options: 'i' } },
-      { email: { $regex: search, $options: 'i' } }
-    ];
-  }
+  const profiles = await StudentProfile.find({ user: { $in: students.map((s) => s._id) } })
+    .select('user branch graduationYear placementReadinessScore mockHistoryCount lastMockAt skills')
+    .lean();
+  const profileByUser = new Map(profiles.map((p) => [String(p.user), p]));
 
-  const total = await User.countDocuments(userQuery);
-  const students = await User.find(userQuery)
-    .select('name email role organization isEmailVerified status createdAt')
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(limit);
+  let rows = students.map((s) => {
+    const p = profileByUser.get(String(s._id));
+    return {
+      _id: p?._id ?? null,
+      user: {
+        _id: s._id, name: s.name, email: s.email, role: 'student',
+        organization: user.organization, status: s.status,
+        isEmailVerified: s.isEmailVerified, createdAt: s.createdAt,
+      },
+      branch: p?.branch ?? null,
+      graduationYear: p?.graduationYear ?? null,
+      placementReadinessScore: Math.round(p?.placementReadinessScore ?? 0),
+      mockHistoryCount: p?.mockHistoryCount ?? 0,
+      lastMockAt: p?.lastMockAt ?? null,
+      skills: p?.skills ?? [],
+      onboarded: Boolean(p),
+      _createdAt: s.createdAt,
+    };
+  });
 
-  const studentIds = students.map(student => student._id);
-  const profileQuery = { user: { $in: studentIds } };
-  if (branch) profileQuery.branch = branch;
-  if (graduationYear) profileQuery.graduationYear = graduationYear;
+  if (search) rows = rows.filter((r) =>
+    r.user.name.toLowerCase().includes(search) ||
+    r.user.email.toLowerCase().includes(search) ||
+    (r.branch || '').toLowerCase().includes(search));
+  if (branch) rows = rows.filter((r) => (r.branch || '').toLowerCase() === branch.toLowerCase());
+  if (graduationYear) rows = rows.filter((r) => Number(r.graduationYear) === graduationYear);
 
-  const profiles = await StudentProfile.find(profileQuery).populate('user', 'name email role organization status');
+  const bandTest = { top: (n) => n >= 85, high: (n) => n >= 70 && n < 85, mid: (n) => n >= 50 && n < 70, risk: (n) => n < 50 }[band];
+  if (bandTest) rows = rows.filter((r) => bandTest(r.placementReadinessScore));
+
+  rows.sort((a, b) => {
+    if (sort === 'readiness_desc') return b.placementReadinessScore - a.placementReadinessScore;
+    if (sort === 'readiness_asc') return a.placementReadinessScore - b.placementReadinessScore;
+    if (sort === 'name') return a.user.name.localeCompare(b.user.name);
+    return new Date(b._createdAt).getTime() - new Date(a._createdAt).getTime();
+  });
+
+  const total = rows.length;
+  const start = (page - 1) * limit;
+  const pageRows = rows.slice(start, start + limit).map((r) => { delete r._createdAt; return r; });
 
   return res.status(200).json({
     success: true,
     message: 'Students fetched successfully.',
-    data: profiles,
-    pagination: {
-      page,
-      limit,
-      total,
-      pages: Math.ceil(total / limit)
-    }
+    data: pageRows,
+    pagination: { page, limit, total, pages: Math.ceil(total / limit) }
   });
 };
 
@@ -272,12 +297,32 @@ const getStudentDetails = async (req, res) => {
     return res.status(404).json({ success: false, message: 'Student not found in your organization.' });
   }
 
-  const profile = await StudentProfile.findOne({ user: student._id }).populate('user', 'name email role organization status isEmailVerified createdAt');
+  const [profile, sessions, analytics, scoreHistory, insights, batch] = await Promise.all([
+    StudentProfile.findOne({ user: student._id }).populate('user', 'name email role organization status isEmailVerified createdAt'),
+    InterviewSession.find({ student: student._id }).sort({ createdAt: -1 }).limit(10)
+      .select('targetRole status finalCompositeScore finalGrade proctoringRiskScore startedAt completedAt createdAt'),
+    InterviewAnalytics.find({ student: student._id }).sort({ createdAt: -1 }).limit(5)
+      .select('overallScore finalGrade proctoringRiskScore roundAnalytics completedAt'),
+    PlacementScoreHistory.find({ student: student._id }).sort({ recordedAt: -1, createdAt: -1 }).limit(12)
+      .select('overallScore scoreBreakdown trend recordedAt createdAt notes'),
+    PerformanceInsight.find({ student: student._id }).sort({ createdAt: -1 }).limit(3)
+      .select('narrativeSummary strengths weaknesses skillGapsVsJd actionableStudyPlan createdAt'),
+    PlacementBatch.findOne({ organization: user._id, 'students.student': student._id })
+      .select('batchName batchCode department section graduationYear'),
+  ]);
 
   return res.status(200).json({
     success: true,
     message: 'Student details fetched successfully.',
-    data: { student, profile }
+    data: {
+      student,
+      profile,
+      batch,
+      recentSessions: sessions,
+      recentAnalytics: analytics,
+      scoreHistory,
+      insights,
+    }
   });
 };
 
@@ -808,7 +853,8 @@ const createCampaign = async (req, res) => {
     targetDepartment: req.body.targetDepartment || [],
     targetBatch: req.body.targetBatch || [],
     config: req.body.config || {},
-    deadline: req.body.deadline,
+    // Default a campaign deadline to 30 days out if the officer didn't set one.
+    deadline: req.body.deadline || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
     isActive: req.body.isActive ?? true
   });
 
@@ -1891,26 +1937,32 @@ const getStudentsWhoMissedAptitude = async (req, res) => {
         { $sort: { _id: 1 } }
       ]);
 
-      const placementInsight = await PlacementInsight.create({
-        organization: context.user._id,
-        insightType: 'university-benchmark',
-        title: 'University-Level Placement Insights',
-        summary: generateUniversitySummary(readinessDistribution, sessionMetrics[0]),
-        data: {
-          studentsCount: students.length,
-          activeBatches: allBatches.length,
-          period: `${days} days`
+      // Upsert (not create) so a fresh read doesn't spawn a new document every
+      // time the dashboard loads — keep a single rolling snapshot per org.
+      const placementInsight = await PlacementInsight.findOneAndUpdate(
+        { organization: context.user._id, insightType: 'university-benchmark' },
+        {
+          organization: context.user._id,
+          insightType: 'university-benchmark',
+          title: 'University-Level Placement Insights',
+          summary: generateUniversitySummary(readinessDistribution, sessionMetrics[0]),
+          data: {
+            studentsCount: students.length,
+            activeBatches: allBatches.length,
+            period: `${days} days`
+          },
+          metrics: {
+            totalStudents: students.length,
+            placementReadyCount: readinessDistribution.excellent + readinessDistribution.good,
+            atRiskCount: readinessDistribution.atRisk,
+            averageReadinessScore: calculateAverage(profiles.map(p => p.placementReadinessScore || 0)),
+            averageInterviewScore: sessionMetrics[0]?.averageScore || 0,
+            averageRiskScore: sessionMetrics[0]?.averageRisk || 0
+          },
+          batchComparisonData: batchPerformanceData
         },
-        metrics: {
-          totalStudents: students.length,
-          placementReadyCount: readinessDistribution.excellent + readinessDistribution.good,
-          atRiskCount: readinessDistribution.atRisk,
-          averageReadinessScore: calculateAverage(profiles.map(p => p.placementReadinessScore || 0)),
-          averageInterviewScore: sessionMetrics[0]?.averageScore || 0,
-          averageRiskScore: sessionMetrics[0]?.averageRisk || 0
-        },
-        batchComparisonData: batchPerformanceData
-      });
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
 
       await AuditLog.logAction({
         user: context.user._id,
@@ -1945,6 +1997,7 @@ const getStudentsWhoMissedAptitude = async (req, res) => {
             averageInterviewScore: Math.round(sessionMetrics[0]?.averageScore || 0),
             averageRiskScore: Math.round(sessionMetrics[0]?.averageRisk || 0)
           },
+          summary: generateUniversitySummary(readinessDistribution, sessionMetrics[0]),
           readinessDistribution,
           batchPerformance: batchPerformanceData,
           performanceTrend: trendData.map(t => ({
@@ -1966,10 +2019,119 @@ const getStudentsWhoMissedAptitude = async (req, res) => {
 const generateUniversitySummary = (readinessDist, sessionMetrics) => {
     const totalStudents = Object.values(readinessDist).reduce((sum, v) => sum + v, 0);
     const placementReady = (readinessDist.excellent || 0) + (readinessDist.good || 0);
+    if (totalStudents === 0) return 'No student readiness data available yet for this cohort.';
 
     return `${placementReady} out of ${totalStudents} students (${Math.round(placementReady / totalStudents * 100)}%) are placement-ready. ` +
       `Average interview score: ${Math.round(sessionMetrics?.averageScore || 0)} with ${sessionMetrics?.completedSessions || 0} completed sessions. ` +
       `${readinessDist.atRisk} students require immediate intervention.`;
+  };
+
+  /**
+   * Natural-language Q&A over the college's own cohort data. Builds a compact
+   * snapshot (roster stats, readiness bands, per-batch performance, top/bottom
+   * students, recent trend) and asks Gemini to answer grounded in it.
+   */
+  const askCollegeInsights = async (req, res) => {
+    try {
+      const context = await fetchCollegeContext(req.user.id);
+      if (!context) {
+        return res.status(404).json({ success: false, message: 'College admin not found.' });
+      }
+
+      const question = String(req.body.question || req.body.q || '').trim();
+      if (!question) {
+        return res.status(400).json({ success: false, message: 'A question is required.' });
+      }
+      if (question.length > 500) {
+        return res.status(400).json({ success: false, message: 'Question is too long (500 characters max).' });
+      }
+
+      const students = await User.find({ role: 'student', organization: context.user.organization }).select('_id name email');
+      const studentIds = students.map((s) => s._id);
+      const studentNameById = new Map(students.map((s) => [String(s._id), s.name]));
+
+      const [profiles, batches, analyticsAgg, trend] = await Promise.all([
+        StudentProfile.find({ user: { $in: studentIds } }).select('user branch graduationYear placementReadinessScore mockHistoryCount').lean(),
+        PlacementBatch.find({ organization: context.user._id, status: { $ne: 'archived' } })
+          .select('batchName department graduationYear students').lean(),
+        InterviewAnalytics.aggregate([
+          { $match: { student: { $in: studentIds } } },
+          { $sort: { createdAt: -1 } },
+          { $group: { _id: '$student', latestScore: { $first: '$overallScore' }, latestGrade: { $first: '$finalGrade' }, latestRisk: { $first: '$proctoringRiskScore' }, sessions: { $sum: 1 } } }
+        ]),
+        InterviewAnalytics.aggregate([
+          { $match: { student: { $in: studentIds }, completedAt: { $ne: null } } },
+          { $group: { _id: { $dateToString: { format: '%Y-%m', date: '$completedAt' } }, avgScore: { $avg: '$overallScore' }, sessions: { $sum: 1 } } },
+          { $sort: { _id: 1 } }
+        ]),
+      ]);
+
+      const readinessByUser = new Map(profiles.map((p) => [String(p.user), p]));
+      const analyticsByUser = new Map(analyticsAgg.map((a) => [String(a._id), a]));
+
+      const scored = profiles
+        .map((p) => ({
+          name: studentNameById.get(String(p.user)) || 'Unknown',
+          branch: p.branch || null,
+          graduationYear: p.graduationYear || null,
+          readiness: Math.round(p.placementReadinessScore || 0),
+          mockInterviews: p.mockHistoryCount || 0,
+          latestInterviewScore: analyticsByUser.get(String(p.user))?.latestScore ?? null,
+        }))
+        .sort((a, b) => b.readiness - a.readiness);
+
+      const bands = {
+        placementReady_80plus: scored.filter((s) => s.readiness >= 80).length,
+        good_65to79: scored.filter((s) => s.readiness >= 65 && s.readiness < 80).length,
+        needsFocus_50to64: scored.filter((s) => s.readiness >= 50 && s.readiness < 65).length,
+        atRisk_below50: scored.filter((s) => s.readiness < 50).length,
+      };
+
+      const batchSummary = batches.map((b) => {
+        const active = (b.students || []).filter((s) => s.status === 'active').map((s) => String(s.student));
+        const rs = active.map((id) => readinessByUser.get(id)?.placementReadinessScore || 0);
+        return {
+          batch: b.batchName,
+          department: b.department,
+          graduationYear: b.graduationYear,
+          students: active.length,
+          avgReadiness: rs.length ? Math.round(rs.reduce((a, c) => a + c, 0) / rs.length) : 0,
+        };
+      });
+
+      const snapshot = {
+        organization: context.organization?.organizationName,
+        totalStudents: students.length,
+        studentsWithReadinessData: profiles.length,
+        avgReadiness: profiles.length ? Math.round(profiles.reduce((a, p) => a + (p.placementReadinessScore || 0), 0) / profiles.length) : 0,
+        readinessBands: bands,
+        batches: batchSummary,
+        topStudents: scored.slice(0, 10),
+        bottomStudents: scored.filter((s) => s.readiness > 0).slice(-10).reverse(),
+        monthlyScoreTrend: trend.map((t) => ({ month: t._id, avgInterviewScore: Math.round(t.avgScore || 0), sessions: t.sessions })),
+      };
+
+      const { answerCollegeQuery } = require('../services/geminiService.js');
+      let answer;
+      try {
+        answer = await answerCollegeQuery({ question, snapshot });
+      } catch (aiErr) {
+        return res.status(503).json({
+          success: false,
+          code: 'AI_UNAVAILABLE',
+          message: 'The insights assistant is temporarily unavailable. Please try again shortly.'
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Insight generated.',
+        data: { question, answer }
+      });
+    } catch (err) {
+      logger.error('askCollegeInsights error:', err);
+      return sendError(res, err);
+    }
   };
 
   const getBatchReadinessStats = async (req, res) => {
@@ -2711,5 +2873,6 @@ const generateUniversitySummary = (readinessDist, sessionMetrics) => {
     updateStudentIntelligenceProfile,
     getStudentScoreHistory,
     recalculateReadinessScores,
-    getCampaignResults
+    getCampaignResults,
+    askCollegeInsights
   };

@@ -11,6 +11,7 @@ const PUBLIC_PREFIXES = [
   "/reset-password",
   "/about",
   "/features",
+  "/pricing",
   "/privacy",
   "/payment",
 ];

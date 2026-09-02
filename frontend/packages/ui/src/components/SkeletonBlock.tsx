@@ -6,7 +6,7 @@ interface SkeletonBlockProps {
   width?: string;
 }
 
-export function SkeletonBlock({ className = "bg-var(--th-bg)", height = "h-4", width = "w-full" }: SkeletonBlockProps) {
+export function SkeletonBlock({ className = "", height = "h-4", width = "w-full" }: SkeletonBlockProps) {
   return (
     <div
       className={cn("skeleton", height, width, className)}

@@ -2,13 +2,18 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Building2, LogOut } from "lucide-react";
+import { LayoutDashboard, Building2, ClipboardCheck, CreditCard, ScrollText, LogOut, GraduationCap, BarChart3 } from "lucide-react";
 import { Logo } from "@synclyft/ui/components/Logo";
 import { useAuthStore } from "@synclyft/lib/store/auth";
 
 const NAV = [
   { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
-  { label: "College Approvals", href: "/pending-colleges", icon: Building2 },
+  { label: "Analytics", href: "/analytics", icon: BarChart3 },
+  { label: "College Approvals", href: "/pending-colleges", icon: ClipboardCheck },
+  { label: "Organizations", href: "/organizations", icon: Building2 },
+  { label: "Students", href: "/students", icon: GraduationCap },
+  { label: "Subscriptions", href: "/subscriptions", icon: CreditCard },
+  { label: "Audit Log", href: "/audit-logs", icon: ScrollText },
 ];
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
@@ -21,22 +26,22 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         className="sticky top-0 z-40 border-b"
         style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-bg-secondary)" }}
       >
-        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-5">
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2.5">
-              <Logo size={24} />
-              <span className="text-sm font-semibold" style={{ fontFamily: "var(--font-inter-tight), sans-serif" }}>
+        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-3 px-4 sm:px-5">
+          <div className="flex min-w-0 items-center gap-3 sm:gap-6">
+            <div className="flex shrink-0 items-center gap-2">
+              <Logo size={22} />
+              <span className="hidden text-sm font-semibold sm:inline" style={{ fontFamily: "var(--font-inter-tight), sans-serif" }}>
                 Admin Console
               </span>
             </div>
-            <nav className="flex items-center gap-1">
+            <nav className="flex items-center gap-1 overflow-x-auto">
               {NAV.map((n) => {
                 const active = pathname === n.href || pathname.startsWith(n.href + "/");
                 return (
                   <Link
                     key={n.href}
                     href={n.href}
-                    className="flex items-center gap-2 rounded px-3 py-1.5 text-sm"
+                    className="flex shrink-0 items-center gap-1.5 rounded px-2.5 py-1.5 text-xs sm:text-sm"
                     style={{
                       color: active ? "var(--th-primary)" : "var(--th-text-secondary)",
                       backgroundColor: active
@@ -45,7 +50,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                     }}
                   >
                     <n.icon size={14} />
-                    {n.label}
+                    <span className="hidden sm:inline">{n.label}</span>
                   </Link>
                 );
               })}
@@ -53,14 +58,14 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           </div>
           <button
             onClick={() => logout()}
-            className="flex items-center gap-1.5 text-xs"
+            className="flex shrink-0 items-center gap-1.5 text-xs"
             style={{ color: "var(--th-text-faint)" }}
           >
-            <LogOut size={13} /> Sign out
+            <LogOut size={13} /> <span className="hidden sm:inline">Sign out</span>
           </button>
         </div>
       </header>
-      <main className="mx-auto max-w-7xl px-5 py-6">{children}</main>
+      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-5">{children}</main>
     </div>
   );
 }

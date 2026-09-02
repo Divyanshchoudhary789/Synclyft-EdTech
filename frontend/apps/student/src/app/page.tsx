@@ -27,6 +27,7 @@ import { Badge } from "@synclyft/ui/components/Badge";
 import Firstnav from "@/components/layout/Firstnav";
 import { useTheme } from "@synclyft/lib/theme";
 import { cn } from "@synclyft/lib/utils";
+import { subscriptionService } from "@synclyft/lib/api/services";
 import Footer from "@/components/layout/Footer";
 
 const HERO_WORDS = ["Aptitude", "Coding", "Technical", "HR"];
@@ -103,47 +104,110 @@ const testimonials = [
   },
 ];
 
-const studentPlans = [
-  {
-    name: "Student",
-    price: "₹299",
-    period: "/ month",
-    desc: "For individual candidates preparing for campus or off-campus drives.",
-    features: ["5 full mock interviews/month", "All 4 round types", "Basic analytics", "Resume upload & ATS score", "PDF report export"],
-    cta: "Start free trial",
-    highlighted: false,
-  },
-  {
-    name: "Pro",
-    price: "₹799",
-    period: "/ month",
-    desc: "For serious candidates targeting top-tier companies.",
-    features: ["Unlimited mock interviews", "Company-specific question banks", "Advanced analytics & percentile", "Resume optimizer with AI suggestions", "Priority report generation", "LinkedIn optimization tips"],
-    cta: "Get Pro",
-    highlighted: true,
-  },
-];
+// ── Pricing: rendered from the live catalogue (/subscriptions/plans/public + /plans/org) ──
+interface PlanCard {
+  key: string;
+  name: string;
+  price: string;
+  period: string;
+  desc: string;
+  features: string[];
+  cta: string;
+  href: string;
+  highlighted: boolean;
+}
 
-const orgPlans = [
-  {
-    name: "Institution",
-    price: "₹12,000",
-    period: "/ month",
-    desc: "For placement cells, coaching institutes, and boot camps.",
-    features: ["Up to 500 students", "Officer portal access", "Batch analytics & reports", "NL query interface", "Custom company JD banks", "Dedicated support", "API access"],
-    cta: "Request demo",
-    highlighted: false,
-  },
-  {
-    name: "Enterprise",
-    price: "Custom",
-    period: "",
-    desc: "For large universities and global organizations requiring custom integrations.",
-    features: ["Unlimited students", "Dedicated custom domain", "Single Sign-On (SSO) authentication", "SLA & custom uptime guarantee", "24/7 dedicated account manager", "Custom LMS / HRIS integration"],
-    cta: "Contact sales",
-    highlighted: true,
-  },
-];
+type RawPlan = {
+  name?: string;
+  monthlyPrice?: number;
+  yearlyPrice?: number;
+  seats?: number;
+  features?: Record<string, boolean>;
+  limits?: Record<string, number>;
+};
+
+const inr = (n: number) => `₹${n.toLocaleString("en-IN")}`;
+const fmtLimit = (n?: number) => (n === undefined ? "" : n < 0 ? "Unlimited" : `${n}`);
+
+const STUDENT_PLAN_META: Record<string, { desc: string; highlighted?: boolean }> = {
+  STUDENT_BASIC: { desc: "For individual candidates preparing for campus or off-campus drives." },
+  STUDENT_PRO: { desc: "For serious candidates targeting top-tier companies.", highlighted: true },
+  STUDENT_PREMIUM: { desc: "Unlimited practice for candidates going all-in on placements." },
+};
+const ORG_PLAN_META: Record<string, { desc: string; highlighted?: boolean }> = {
+  BASIC: { desc: "For placement cells and coaching institutes starting out." },
+  PRO: { desc: "For established placement teams running batch-wide drives.", highlighted: true },
+  ENTERPRISE: { desc: "For large universities needing custom integrations and scale." },
+};
+
+function studentFeatures(p: RawPlan): string[] {
+  const mi = p.limits?.mockInterviewsPerMonth;
+  const rp = p.limits?.studentReportsPerMonth;
+  const out: string[] = [];
+  out.push(mi !== undefined && mi < 0 ? "Unlimited mock interviews" : `${fmtLimit(mi)} mock interviews / month`);
+  out.push("Aptitude, Coding, Technical & HR rounds");
+  if (p.features?.aiEvaluation) out.push("AI evaluation & round-by-round feedback");
+  out.push(rp !== undefined && rp < 0 ? "Unlimited PDF report exports" : `${fmtLimit(rp)} PDF report exports / month`);
+  out.push("Resume upload & ATS analysis");
+  if (p.features?.proctoring) out.push("AI proctoring on mock interviews");
+  if (p.features?.placementIntelligence) out.push("Placement-readiness intelligence");
+  if (p.features?.advancedAnalytics) out.push("Advanced analytics & percentile");
+  return out;
+}
+function orgFeatures(p: RawPlan): string[] {
+  const out: string[] = [];
+  if (p.seats) out.push(`Up to ${p.seats.toLocaleString("en-IN")} student seats`);
+  out.push("Officer portal with batch analytics");
+  if (p.features?.studentReports) out.push("Batch & student performance reports");
+  if (p.features?.placementIntelligence) out.push("Placement intelligence & AI insights");
+  if (p.features?.batchManagement) out.push("Batch management & campaigns");
+  if (p.features?.proctoring) out.push("Proctored assessments");
+  if (p.features?.advancedAnalytics) out.push("Advanced analytics");
+  if (p.features?.apiAccess) out.push("API access");
+  if (p.features?.customBranding) out.push("Custom branding");
+  return out;
+}
+
+function buildStudentCards(map: Record<string, RawPlan>, billing: "monthly" | "yearly"): PlanCard[] {
+  const order = ["STUDENT_BASIC", "STUDENT_PRO", "STUDENT_PREMIUM"];
+  return Object.entries(map)
+    .sort(([a], [b]) => order.indexOf(a) - order.indexOf(b))
+    .map(([key, p]) => {
+      const monthly = p.monthlyPrice ?? 0;
+      const yearly = p.yearlyPrice ?? monthly * 12;
+      return {
+        key,
+        name: (p.name || key).replace(/^Student /, ""),
+        price: billing === "monthly" ? inr(monthly) : inr(yearly),
+        period: billing === "monthly" ? "/ month" : "/ year",
+        desc: STUDENT_PLAN_META[key]?.desc ?? "",
+        features: studentFeatures(p),
+        cta: "Start free trial",
+        href: "/register",
+        highlighted: Boolean(STUDENT_PLAN_META[key]?.highlighted),
+      };
+    });
+}
+function buildOrgCards(map: Record<string, RawPlan>, billing: "monthly" | "yearly"): PlanCard[] {
+  const order = ["BASIC", "PRO", "ENTERPRISE"];
+  return Object.entries(map)
+    .sort(([a], [b]) => order.indexOf(a) - order.indexOf(b))
+    .map(([key, p]) => {
+      const monthly = p.monthlyPrice ?? 0;
+      const yearly = p.yearlyPrice ?? monthly * 12;
+      return {
+        key,
+        name: p.name || key,
+        price: billing === "monthly" ? inr(monthly) : inr(yearly),
+        period: billing === "monthly" ? "/ month" : "/ year",
+        desc: ORG_PLAN_META[key]?.desc ?? "",
+        features: orgFeatures(p),
+        cta: key === "ENTERPRISE" ? "Contact sales" : "Request demo",
+        href: process.env.NEXT_PUBLIC_OFFICER_URL ? `${process.env.NEXT_PUBLIC_OFFICER_URL}/register` : "/register",
+        highlighted: Boolean(ORG_PLAN_META[key]?.highlighted),
+      };
+    });
+}
 
 const stats = [
   { value: 94, suffix: "%", label: "Placement rate improvement" },
@@ -202,6 +266,9 @@ const FAQS = [
 export default function LandingPage() {
   const [activePortal, setActivePortal] = useState<"student" | "officer">("student");
   const [pricingTab, setPricingTab] = useState<"student" | "org">("student");
+  const [billing, setBilling] = useState<"monthly" | "yearly">("monthly");
+  const [studentCatalog, setStudentCatalog] = useState<Record<string, RawPlan> | null>(null);
+  const [orgCatalog, setOrgCatalog] = useState<Record<string, RawPlan> | null>(null);
   const [activeFaqIdx, setActiveFaqIdx] = useState<number | null>(null);
   const [statsVisible, setStatsVisible] = useState(false);
   const [heroWordIdx, setHeroWordIdx] = useState(0);
@@ -215,6 +282,13 @@ export default function LandingPage() {
   useEffect(() => {
     const timer = setTimeout(() => setStatsVisible(true), 800);
     return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    subscriptionService.plansPublic().then((m) => { if (!cancelled) setStudentCatalog(m as Record<string, RawPlan>); }).catch(() => {});
+    subscriptionService.orgPlans().then((m) => { if (!cancelled) setOrgCatalog(m as Record<string, RawPlan>); }).catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -276,7 +350,7 @@ export default function LandingPage() {
         <motion.div style={{ y: heroParallaxY, opacity: heroOpacity }} className="relative z-10">
           <motion.div
             variants={heroContainer}
-            initial="hidden"
+            initial={false}
             animate="show"
             className="max-w-7xl mx-auto px-4 sm:px-6 pt-4 md:pt-6 pb-6"
           >
@@ -367,7 +441,7 @@ export default function LandingPage() {
 
         {/* Scroll chevron */}
         <motion.div
-          initial={{ opacity: 0 }}
+          initial={false}
           animate={{ opacity: 1 }}
           transition={{ delay: 2 }}
           className="absolute bottom-8 left-1/2 -translate-x-1/2 z-20 hidden md:flex flex-col items-center gap-1"
@@ -463,7 +537,7 @@ export default function LandingPage() {
             {activePortal === "student" ? (
               <motion.div
                 key="student"
-                initial={{ opacity: 0, y: 15 }}
+                initial={false}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -15 }}
                 transition={{ duration: 0.3 }}
@@ -518,7 +592,7 @@ export default function LandingPage() {
             ) : (
               <motion.div
                 key="officer"
-                initial={{ opacity: 0, y: 15 }}
+                initial={false}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -15 }}
                 transition={{ duration: 0.3 }}
@@ -590,7 +664,7 @@ export default function LandingPage() {
 
           <motion.div
             variants={heroContainer}
-            initial="hidden"
+            initial={false}
             whileInView="show"
             viewport={{ once: true, margin: "-100px" }}
             className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6"
@@ -639,7 +713,7 @@ export default function LandingPage() {
 
         <motion.div
           variants={heroContainer}
-          initial="hidden"
+          initial={false}
           whileInView="show"
           viewport={{ once: true, margin: "-100px" }}
           className="grid md:grid-cols-3 gap-6"
@@ -739,85 +813,115 @@ export default function LandingPage() {
             </div>
           </div>
 
-          <div className="grid md:grid-cols-2 gap-6 max-w-3xl mx-auto items-stretch">
-            {(pricingTab === "student" ? studentPlans : orgPlans).map((plan) => (
-              <motion.div
-                key={plan.name}
-                initial={{ opacity: 0, y: 30 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                whileHover={{ y: -4, transition: { duration: 0.2 } }}
-                transition={{ type: "spring", stiffness: 90, damping: 15 }}
-                className={cn(
-                  "p-8 rounded-2xl border space-y-6 flex flex-col justify-between transition-all duration-300",
-                  plan.highlighted
-                    ? "bg-[#12151A] border-[#0062FF] text-white shadow-xl md:-translate-y-2 relative"
-                    : ""
-                )}
-                style={!plan.highlighted ? { backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)", color: "var(--th-text-primary)" } : {}}
-              >
-                {plan.highlighted && (
-                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#0062FF] text-white text-[0.65rem] font-bold uppercase tracking-widest px-3 py-1 rounded-full shadow-sm">
-                    Most Popular
-                  </span>
-                )}
-                <div className="space-y-4">
-                  <div>
-                    <div className={cn("font-semibold text-xs uppercase tracking-wider", plan.highlighted ? "text-[#0062FF]" : "")} style={!plan.highlighted ? { color: "var(--th-text-muted)" } : {}}>
-                      {plan.name}
-                    </div>
-                    <div className="flex items-baseline gap-1 mt-2">
-                      <span
-                        className="text-[2.25rem] font-bold leading-none tracking-tight"
-                        style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: plan.highlighted ? "#0062FF" : "var(--th-text-primary)" }}
-                      >
-                        {plan.price}
-                      </span>
-                      {plan.period && (
-                        <span className="text-xs font-mono" style={{ color: plan.highlighted ? "#6B7280" : "var(--th-text-faint)" }}>
-                          {plan.period}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs mt-3 leading-relaxed" style={{ color: plan.highlighted ? "#9CA3AF" : "var(--th-text-muted)" }}>
-                      {plan.desc}
-                    </p>
-                  </div>
-
-                  <ul className="space-y-3 pt-2">
-                    {plan.features.map((f) => (
-                      <li key={f} className="flex items-center gap-2.5 text-xs" style={{ color: plan.highlighted ? "#C8CDD5" : "var(--th-text-secondary)" }}>
-                        <CheckCircle size={14} style={{ color: plan.highlighted ? "#0062FF" : "#3DDC84" }} className="shrink-0" />
-                        <span>{f}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-
-                <div className="pt-6">
-                  <Link
-                    href="/register"
-                    className={cn(
-                      "btn-primary w-full justify-center py-2.5 rounded-xl font-semibold transition-all text-xs",
-                      plan.highlighted
-                        ? "bg-[#0062FF] hover:bg-[#004BE6] text-white shadow-lg shadow-[#0062FF]/10"
-                        : ""
-                    )}
-                    style={!plan.highlighted ? { backgroundColor: "transparent", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)", border: "1px solid" } : {}}
-                  >
-                    {plan.cta}
-                  </Link>
-                </div>
-              </motion.div>
-            ))}
+          {/* Monthly / yearly billing toggle */}
+          <div className="flex justify-center mb-8 -mt-6">
+            <div className="inline-flex p-1 rounded-full" style={{ backgroundColor: "var(--th-bg-secondary)", border: "1px solid var(--th-border)" }}>
+              {(["monthly", "yearly"] as const).map((b) => (
+                <button
+                  key={b}
+                  type="button"
+                  onClick={() => setBilling(b)}
+                  className="px-4 py-1.5 rounded-full text-[0.7rem] font-semibold uppercase tracking-wide transition-colors border-0 cursor-pointer"
+                  style={billing === b
+                    ? { backgroundColor: "#0062FF", color: "#fff" }
+                    : { backgroundColor: "transparent", color: "var(--th-text-muted)" }}
+                >
+                  {b === "yearly" ? "Yearly · save ~17%" : "Monthly"}
+                </button>
+              ))}
+            </div>
           </div>
+
+          {(() => {
+            const cards =
+              pricingTab === "student"
+                ? studentCatalog ? buildStudentCards(studentCatalog, billing) : []
+                : orgCatalog ? buildOrgCards(orgCatalog, billing) : [];
+
+            if (cards.length === 0) {
+              return (
+                <div className="grid gap-6 max-w-5xl mx-auto sm:grid-cols-2 lg:grid-cols-3">
+                  {[0, 1, 2].map((i) => (
+                    <div key={i} className="h-96 rounded-2xl border animate-pulse" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }} />
+                  ))}
+                </div>
+              );
+            }
+
+            return (
+              <div className="grid gap-6 max-w-5xl mx-auto sm:grid-cols-2 lg:grid-cols-3 items-stretch">
+                {cards.map((plan) => (
+                  <div
+                    key={plan.key}
+                    className={cn(
+                      "p-7 rounded-2xl border space-y-6 flex flex-col justify-between transition-transform duration-200 hover:-translate-y-1",
+                      plan.highlighted ? "bg-[#12151A] border-[#0062FF] text-white shadow-xl lg:-translate-y-2 relative" : ""
+                    )}
+                    style={!plan.highlighted ? { backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)", color: "var(--th-text-primary)" } : {}}
+                  >
+                    {plan.highlighted && (
+                      <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#0062FF] text-white text-[0.65rem] font-bold uppercase tracking-widest px-3 py-1 rounded-full shadow-sm">
+                        Most Popular
+                      </span>
+                    )}
+                    <div className="space-y-4">
+                      <div>
+                        <div className={cn("font-semibold text-xs uppercase tracking-wider", plan.highlighted ? "text-[#0062FF]" : "")} style={!plan.highlighted ? { color: "var(--th-text-muted)" } : {}}>
+                          {plan.name}
+                        </div>
+                        <div className="flex items-baseline gap-1 mt-2">
+                          <span
+                            className="text-[2rem] font-bold leading-none tracking-tight"
+                            style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: plan.highlighted ? "#0062FF" : "var(--th-text-primary)" }}
+                          >
+                            {plan.price}
+                          </span>
+                          <span className="text-xs font-mono" style={{ color: plan.highlighted ? "#6B7280" : "var(--th-text-faint)" }}>
+                            {plan.period}
+                          </span>
+                        </div>
+                        <p className="text-xs mt-3 leading-relaxed" style={{ color: plan.highlighted ? "#9CA3AF" : "var(--th-text-muted)" }}>
+                          {plan.desc}
+                        </p>
+                      </div>
+
+                      <ul className="space-y-2.5 pt-2">
+                        {plan.features.map((f) => (
+                          <li key={f} className="flex items-start gap-2.5 text-xs" style={{ color: plan.highlighted ? "#C8CDD5" : "var(--th-text-secondary)" }}>
+                            <CheckCircle size={14} style={{ color: plan.highlighted ? "#0062FF" : "#3DDC84" }} className="shrink-0 mt-0.5" />
+                            <span>{f}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    <div className="pt-4">
+                      <Link
+                        href={plan.href}
+                        className={cn(
+                          "flex w-full justify-center py-2.5 rounded-xl font-semibold transition-all text-xs",
+                          plan.highlighted ? "bg-[#0062FF] hover:bg-[#004BE6] text-white shadow-lg shadow-[#0062FF]/10" : "btn-secondary"
+                        )}
+                      >
+                        {plan.cta}
+                      </Link>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+
+          <p className="text-center text-[0.7rem] mt-8" style={{ color: "var(--th-text-faint)" }}>
+            All plans include a 14-day free trial. Prices in INR, taxes as applicable. Students allocated a seat by their college get full access at no personal cost.
+          </p>
         </div>
       </section>
 
       {/* CTA Section */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 py-10 text-center">
         <motion.div
-          initial={{ opacity: 0, scale: 0.98 }}
+          initial={false}
           whileInView={{ opacity: 1, scale: 1 }}
           viewport={{ once: true }}
           transition={{ duration: 0.4 }}

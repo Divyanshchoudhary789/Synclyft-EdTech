@@ -1,5 +1,5 @@
 const rateLimit = require("express-rate-limit");
-
+const { makeStore } = require("../utils/securityUtils.js");
 
 const otpLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -10,6 +10,7 @@ const otpLimiter = rateLimit({
     },
     standardHeaders: true,
     legacyHeaders: false,
+    store: makeStore("otp"),
 });
 
 

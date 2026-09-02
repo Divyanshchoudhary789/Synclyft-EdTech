@@ -1,4 +1,7 @@
 /backend/node_modules
 /backend/.env
-/backend/.env.example
-/backend/docs/
+node_modules/
+.env
+.env*.local
+.DS_Store
+*.log

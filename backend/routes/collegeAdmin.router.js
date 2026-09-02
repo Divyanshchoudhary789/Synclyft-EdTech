@@ -50,7 +50,8 @@ const {
   updateStudentIntelligenceProfile,
   getStudentScoreHistory,
   recalculateReadinessScores,
-  getCampaignResults
+  getCampaignResults,
+  askCollegeInsights
 } = require('../controllers/collegeAdminController.js');
 const {
   getBatchPerformanceReport,
@@ -103,6 +104,7 @@ collegeAdminRouter.get('/insights/top-candidates', validate(collegeInsightsSchem
 collegeAdminRouter.get('/insights/compare-batches', validate(collegeInsightsSchemas.compareBatches, 'query'), asyncHandler(compareBatches));
 collegeAdminRouter.get('/insights/workshop-recommendations', asyncHandler(generateWorkshopRecommendations));
 collegeAdminRouter.get('/insights/university-level', validate(collegeInsightsSchemas.universityInsights, 'query'), asyncHandler(getUniversityLevelAIInsights));
+collegeAdminRouter.post('/insights/ask', asyncHandler(askCollegeInsights));
 collegeAdminRouter.get('/insights/batch-readiness/:batchId', validate(collegeInsightsSchemas.batchReadinessQuery, 'params'), asyncHandler(getBatchReadinessStats));
 collegeAdminRouter.get('/insights/declining-students', validate(collegeInsightsSchemas.decliningStudentsQuery, 'query'), asyncHandler(getDecliningStudents));
 collegeAdminRouter.get('/insights/ai-comparative-report', validate(collegeInsightsSchemas.aiComparativeReport, 'query'), asyncHandler(getAIComparativeReport));

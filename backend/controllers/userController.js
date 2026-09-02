@@ -62,8 +62,12 @@ const issueSession = async (res, user) => {
     return accessToken;
 };
 
-// Validates the operational status of college administrators before authentication
+// Validates account status before authentication. A suspended account is blocked
+// for every role; college-admins additionally need Super-Admin approval.
 const checkUserStatus = (user, res) => {
+    if (user.status === 'Suspended') {
+        return res.status(403).json({ message: "Your account has been suspended. Contact support for help." });
+    }
     if (user.role === 'college-admin') {
         if (user.status === 'Pending') {
             return res.status(403).json({ message: "Your account is awaiting approval from the Super Admin." });
@@ -85,6 +89,7 @@ const handleOAuthUserCreation = async (req, res, oauthDetails) => {
         if (provider === "github") query = { githubId: oauthId };
 
         let user = await User.findOne(query);
+        let isNewUser = false;
 
         if (!user) {
             user = await User.findOne({ email: email });
@@ -96,6 +101,7 @@ const handleOAuthUserCreation = async (req, res, oauthDetails) => {
                 user.isEmailVerified = true;
                 await user.save();
             } else {
+                isNewUser = true;
                 const randomPassword = crypto.randomBytes(16).toString("hex");
                 const hashedPassword = await bcrypt.hash(randomPassword, 12);
 
@@ -134,11 +140,15 @@ const handleOAuthUserCreation = async (req, res, oauthDetails) => {
             req.logout((err) => { if (err) logger.error("Session logout error:", err); });
         }
 
-        return res.status(200).json({ message: "Login Successful", user });
+        // OAuth is a browser navigation, not an XHR — redirect back to the app.
+        // New students land on onboarding; returning users on their dashboard.
+        const base = process.env.FRONTEND_URL || "http://localhost:3000";
+        const dest = isNewUser ? "/onboarding" : "/dashboard";
+        return res.redirect(`${base}${dest}`);
 
     } catch (err) {
         logger.error({ message: err.message, stack: err.stack });
-        return sendError(res, err);
+        return res.redirect(`${process.env.FRONTEND_URL || "http://localhost:3000"}/login?error=${encodeURIComponent("Sign-in failed. Please try again.")}`);
     }
 };
 
@@ -341,6 +351,86 @@ const getCurrentUser = async (req, res) => {
     }
 };
 
+/**
+ * Changes the signed-in user's password. Verifies the current password, sets the
+ * new hash, and rotates the refresh token so other sessions are logged out.
+ */
+const changePassword = async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ message: "Current and new password are required." });
+        }
+        if (String(newPassword).length < 8) {
+            return res.status(400).json({ message: "New password must be at least 8 characters." });
+        }
+        if (currentPassword === newPassword) {
+            return res.status(400).json({ message: "New password must be different from the current one." });
+        }
+
+        const user = await User.findById(req.user.id).select("+password");
+        if (!user) return res.status(404).json({ message: "User not found." });
+        if (!user.password) {
+            return res.status(400).json({ message: "This account signs in with a social provider and has no password to change." });
+        }
+
+        const ok = await bcrypt.compare(currentPassword, user.password);
+        if (!ok) return res.status(400).json({ message: "Current password is incorrect." });
+
+        user.password = await bcrypt.hash(newPassword, 12);
+        user.refreshToken = undefined; // invalidate every other session
+        await user.save();
+
+        // Re-issue this session so the caller stays signed in.
+        const accessToken = await issueSession(res, user);
+
+        return res.status(200).json({ success: true, message: "Password updated. Other devices have been signed out.", token: accessToken });
+    } catch (err) {
+        logger.error({ message: err.message, stack: err.stack });
+        return sendError(res, err);
+    }
+};
+
+/**
+ * Re-sends an OTP for an in-progress signup or login by regenerating just the
+ * code and keeping the existing OTP doc's payload. Lets the client resend
+ * without re-collecting (and re-storing) the password.
+ */
+const resendOtp = async (req, res) => {
+    try {
+        const { email } = req.body;
+        const type = req.body.type === "login" ? "login" : "Signup";
+        if (!email) return res.status(400).json({ message: "Email is required!" });
+
+        const normalizedEmail = normalizeEmail(email);
+        const existing = await Otp.findOne({ email: normalizedEmail, type });
+        if (!existing) {
+            return res.status(400).json({ message: "No pending verification. Please start again." });
+        }
+        // updatedAt moves on every resend, so this throttles each resend by 30s.
+        const lastTouched = (existing.updatedAt || existing.createdAt).getTime();
+        if (Date.now() - lastTouched < 30000) {
+            return res.status(429).json({ message: "Wait 30 seconds before requesting another OTP" });
+        }
+
+        const otp = generateOtp();
+        existing.otp = await bcrypt.hash(otp, 12);
+        existing.expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+        await existing.save();
+
+        try {
+            await sendOtpEmail(normalizedEmail, otp);
+        } catch (err) {
+            throw err;
+        }
+
+        return res.status(200).json({ success: true, message: "OTP resent successfully" });
+    } catch (err) {
+        logger.error({ message: err.message, stack: err.stack });
+        return sendError(res, err);
+    }
+};
+
 const sendSignupOtpForStudent = async (req, res) => {
     try {
         const { name, email, organization, password } = req.body;
@@ -537,7 +627,7 @@ const verifySignupOtpForCollegeAdmin = async (req, res) => {
 
 module.exports = {
     googleAuthCallback, linkedinAuthCallback, githubAuthCallback,
-    loginUsingPass, sendLoginOtp, verifyLoginOtp, logout, refreshAccessToken, getCurrentUser,
+    loginUsingPass, sendLoginOtp, verifyLoginOtp, logout, refreshAccessToken, getCurrentUser, resendOtp, changePassword,
     sendSignupOtpForStudent, verifySignupOtpForStudent,
     sendSignupOtpForCollegeAdmin, verifySignupOtpForCollegeAdmin
 };

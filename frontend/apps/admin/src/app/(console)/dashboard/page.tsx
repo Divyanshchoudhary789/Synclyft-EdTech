@@ -1,288 +1,261 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { CountUp } from "@synclyft/ui/components/CountUp";
 import { Button } from "@synclyft/ui/components/Button";
 import { Badge } from "@synclyft/ui/components/Badge";
-import { motion, AnimatePresence } from "framer-motion";
-import { Settings, Users, ShieldAlert, Activity, Check, Edit3, Trash2, ArrowUpDown } from "lucide-react";
-import { useTheme } from "@synclyft/lib/theme";
-import { api } from "@synclyft/lib/api";
-import { cn } from "@synclyft/lib/utils";
+import { SkeletonCard } from "@synclyft/ui/components/SkeletonBlock";
+import { superAdminService } from "@synclyft/lib/api/services";
+import { toApiError } from "@synclyft/lib/api";
+import {
+  ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
+} from "recharts";
+import {
+  Users, Building2, CreditCard, Armchair, FileText, AlertCircle, ArrowRight, GraduationCap,
+  Activity, ShieldAlert, TrendingUp, ClipboardCheck, IndianRupee,
+} from "lucide-react";
 
-interface UserRecord {
-  id: string;
-  name: string;
-  email: string;
-  role: "student" | "officer" | "admin";
-  college?: string;
-  createdAt: string;
+interface Overview {
+  users: { students: number; collegeAdmins: number; superAdmins: number; pendingAdmins: number };
+  organizations: number;
+  subscriptions: { activeSubscriptions: number };
+  billing: { invoices: number; completedInvoices: number };
+  seats: { totalSeats: number; usedSeats: number; usagePercentage: number };
+  verifiedProfiles: number;
 }
+interface Analytics {
+  interviewStats: { totalSessions: number; completedSessions: number; averageScore: number; averageRiskScore: number; disqualifiedCount: number };
+  proctorStats: { totalReports: number; criticalRiskCount: number; highRiskCount: number; disqualifiedCount: number; averageRiskScore: number };
+  topViolationTypes: { _id: string; count: number }[];
+  trendData: { date: string; sessions: number; averageScore: number; averageRisk: number }[];
+}
+interface Pending { _id?: string; id?: string; name?: string; email?: string; organization?: string; createdAt?: string }
 
-export default function SuperAdminPage() {
-  const [users, setUsers] = useState<UserRecord[]>([
-    { id: "u_001", name: "Arjun Mehta", email: "arjun.mehta@iitb.ac.in", role: "student", college: "IIT Bombay", createdAt: "2025-02-18" },
-    { id: "u_002", name: "Priya Sharma", email: "priya.sharma@delhi.edu", role: "officer", college: "IIT Delhi", createdAt: "2025-02-19" },
-    { id: "u_003", name: "System Admin", email: "admin@synclyft.ai", role: "admin", college: "Synclyft AI", createdAt: "2025-01-01" },
-    { id: "u_004", name: "Rohan Gupta", email: "rohan.g@nit.edu", role: "student", college: "NIT Trichy", createdAt: "2025-02-21" },
-  ]);
+const VIOLATION_LABELS: Record<string, string> = {
+  tab_switch: "Tab switch", window_minimize: "Window minimise", paste_attempt: "Paste attempt",
+  face_not_visible: "Face not visible", multiple_faces: "Multiple faces", context_menu: "Right-click",
+  copy_attempt: "Copy attempt", audio_anomaly: "Audio anomaly",
+};
 
-  const [search, setSearch] = useState("");
-  const [editingUserId, setEditingUserId] = useState<string | null>(null);
-  const [tempRole, setTempRole] = useState<"student" | "officer" | "admin">("student");
-  
-  // Platform configs
-  const [maintenanceMode, setMaintenanceMode] = useState(false);
-  const [allowRegistration, setAllowRegistration] = useState(true);
-  const [apiLimit, setApiLimit] = useState(100);
+export default function AdminDashboardPage() {
+  const [ov, setOv] = useState<Overview | null>(null);
+  const [analytics, setAnalytics] = useState<Analytics | null>(null);
+  const [subStats, setSubStats] = useState<Record<string, number> | null>(null);
+  const [pending, setPending] = useState<Pending[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const [saved, setSaved] = useState(false);
-  const { theme } = useTheme();
-  const isDark = theme === "dark";
-
-  const handleRoleChange = (userId: string, newRole: "student" | "officer" | "admin") => {
-    setUsers(prev => prev.map(u => u.id === userId ? { ...u, role: newRole } : u));
-    setEditingUserId(null);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
-
-  const handleDeleteUser = (userId: string) => {
-    if (confirm("Are you sure you want to delete this user?")) {
-      setUsers(prev => prev.filter(u => u.id !== userId));
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [o, a, s, p] = await Promise.allSettled([
+        superAdminService.overview(),
+        superAdminService.analyticsOverview({ days: 30 }),
+        superAdminService.subscriptionStats(),
+        superAdminService.pendingApprovals(),
+      ]);
+      if (o.status === "fulfilled") setOv(o.value as Overview);
+      else setError(toApiError(o.reason).message);
+      if (a.status === "fulfilled") setAnalytics(a.value as Analytics);
+      if (s.status === "fulfilled") setSubStats(s.value as Record<string, number>);
+      if (p.status === "fulfilled") setPending((p.value as Pending[]).slice(0, 5));
+    } finally {
+      setLoading(false);
     }
   };
+  useEffect(() => { load(); }, []);
 
-  const filteredUsers = users.filter(u => 
-    u.name.toLowerCase().includes(search.toLowerCase()) ||
-    u.email.toLowerCase().includes(search.toLowerCase()) ||
-    (u.college && u.college.toLowerCase().includes(search.toLowerCase()))
-  );
+  const mrr = Number(subStats?.mrr ?? 0);
+  const trend = (analytics?.trendData ?? []).map((d) => ({
+    date: new Date(d.date).toLocaleDateString("en-IN", { day: "numeric", month: "short" }),
+    sessions: d.sessions,
+    score: d.averageScore,
+  }));
+
+  const kpis = ov ? [
+    { label: "Students", value: ov.users.students, icon: GraduationCap, color: "#4D7CFF", href: "/students" },
+    { label: "Colleges", value: ov.users.collegeAdmins, icon: Users, color: "#0062FF", href: "/organizations" },
+    { label: "Organizations", value: ov.organizations, icon: Building2, color: "#3DDC84", href: "/organizations" },
+    { label: "Active subscriptions", value: ov.subscriptions.activeSubscriptions, icon: CreditCard, color: "#F59E0B", href: "/subscriptions" },
+    { label: "Seats used", value: ov.seats.usedSeats, sub: `of ${ov.seats.totalSeats} · ${ov.seats.usagePercentage}%`, icon: Armchair, color: "#8B5CF6", href: "/subscriptions" },
+    { label: "Invoices", value: ov.billing.invoices, sub: `${ov.billing.completedInvoices} paid`, icon: FileText, color: "#EC4899", href: "/subscriptions" },
+    { label: "Verified profiles", value: ov.verifiedProfiles, icon: TrendingUp, color: "#14B8A6" },
+    { label: "Pending approvals", value: ov.users.pendingAdmins, icon: ClipboardCheck, color: "#FF5C5C", href: "/pending-colleges" },
+  ] : [];
+
+  const iv = analytics?.interviewStats;
+  const pr = analytics?.proctorStats;
 
   return (
-    <div className="min-h-screen pb-20" style={{ backgroundColor: "var(--th-bg)", fontFamily: "var(--font-inter), sans-serif" }}>
-      
-
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-10">
-        
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8 pb-4 border-b border-dashed" style={{ borderColor: "var(--th-border)" }}>
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-red-500/10 text-red-600 dark:text-red-400">
-              <ShieldAlert size={22} />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-[var(--th-text-primary)]">Super Admin Dashboard</h1>
-              <p className="text-xs text-[var(--th-text-faint)]">System health diagnostics, global configurations, and role management controls</p>
-            </div>
-          </div>
-          {saved && (
-            <span className="text-xs font-semibold text-emerald-500 flex items-center gap-1 bg-emerald-500/10 px-3 py-1.5 rounded-lg border border-emerald-500/20">
-              <Check size={14} /> System state updated!
-            </span>
-          )}
+    <div className="space-y-6">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <p className="label-caption" style={{ color: "var(--th-text-faint)" }}>Platform</p>
+          <h1 className="text-2xl font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>Overview</h1>
         </div>
-
-        {/* Diagnostic Overview Grid */}
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          {[
-            { label: "Total Platform Users", value: users.length, sub: "+12% this week", icon: Users, color: "text-blue-500" },
-            { label: "System Health Rate", value: "99.8%", sub: "All services nominal", icon: Activity, color: "text-emerald-500" },
-            { label: "Pending Tickets", value: "0", sub: "Clean support inbox", icon: Settings, color: "text-amber-500" },
-            { label: "API Requests / Min", value: "1,247", sub: "Rate limits normal", icon: ShieldAlert, color: "text-red-500" },
-          ].map((card, i) => (
-            <div 
-              key={i}
-              className="p-5 rounded-2xl border flex items-center justify-between"
-              style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}
-            >
-              <div className="space-y-1.5 text-left">
-                <p className="text-[10px] uppercase font-bold text-[var(--th-text-faint)]">{card.label}</p>
-                <p className="text-2xl font-bold text-[var(--th-text-primary)]">{card.value}</p>
-                <p className="text-[10px] text-emerald-500">{card.sub}</p>
-              </div>
-              <div className={cn("p-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-800", card.color)}>
-                <card.icon size={20} />
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Double-column section */}
-        <div className="grid lg:grid-cols-12 gap-8 items-start">
-          
-          {/* Column 1: System Config */}
-          <div className="lg:col-span-4 space-y-6">
-            <div 
-              className="p-6 rounded-2xl border space-y-5 text-left"
-              style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}
-            >
-              <h3 className="font-bold text-sm text-[var(--th-text-primary)] border-b pb-3" style={{ borderColor: "var(--th-border)" }}>
-                System Controls
-              </h3>
-
-              {/* Maintenance Mode */}
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-[var(--th-text-primary)]">Maintenance Mode</p>
-                  <p className="text-[10px] text-[var(--th-text-faint)]">Lock front-end logins for deployment</p>
-                </div>
-                <input 
-                  type="checkbox" 
-                  checked={maintenanceMode} 
-                  onChange={(e) => {
-                    setMaintenanceMode(e.target.checked);
-                    setSaved(true);
-                    setTimeout(() => setSaved(false), 2000);
-                  }}
-                  className="w-4 h-4 rounded accent-red-500 cursor-pointer"
-                />
-              </div>
-
-              {/* Registrations */}
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-[var(--th-text-primary)]">Allow Registrations</p>
-                  <p className="text-[10px] text-[var(--th-text-faint)]">Accept new student/company accounts</p>
-                </div>
-                <input 
-                  type="checkbox" 
-                  checked={allowRegistration} 
-                  onChange={(e) => {
-                    setAllowRegistration(e.target.checked);
-                    setSaved(true);
-                    setTimeout(() => setSaved(false), 2000);
-                  }}
-                  className="w-4 h-4 rounded accent-[#0062FF] cursor-pointer"
-                />
-              </div>
-
-              {/* API Slider limit */}
-              <div className="space-y-2 pt-2 border-t" style={{ borderColor: "var(--th-border)" }}>
-                <div className="flex justify-between text-xs">
-                  <span className="font-semibold text-[var(--th-text-primary)]">Global Rate Limit</span>
-                  <span className="font-mono text-[var(--th-text-secondary)]">{apiLimit} req/s</span>
-                </div>
-                <input 
-                  type="range" 
-                  min="50" 
-                  max="500" 
-                  value={apiLimit} 
-                  onChange={(e) => setApiLimit(parseInt(e.target.value))}
-                  onMouseUp={() => {
-                    setSaved(true);
-                    setTimeout(() => setSaved(false), 2000);
-                  }}
-                  className="w-full h-1.5 bg-neutral-200 dark:bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-[#0062FF]"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Column 2: User management */}
-          <div className="lg:col-span-8 space-y-4">
-            <div 
-              className="p-6 rounded-2xl border text-left space-y-4"
-              style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}
-            >
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b pb-3" style={{ borderColor: "var(--th-border)" }}>
-                <h3 className="font-bold text-sm text-[var(--th-text-primary)]">
-                  User Management
-                </h3>
-                
-                {/* Search */}
-                <input 
-                  type="text"
-                  placeholder="Search user, email or college..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="px-3 py-1.5 rounded-lg border text-xs text-[var(--th-text-primary)] max-w-xs"
-                  style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-border-strong)" }}
-                />
-              </div>
-
-              {/* Table */}
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse min-w-[500px]">
-                  <thead>
-                    <tr className="border-b" style={{ borderColor: "var(--th-border)" }}>
-                      <th className="py-2.5 text-[10px] uppercase font-bold text-[var(--th-text-faint)]">User Details</th>
-                      <th className="py-2.5 text-[10px] uppercase font-bold text-[var(--th-text-faint)]">Institution</th>
-                      <th className="py-2.5 text-[10px] uppercase font-bold text-[var(--th-text-faint)]">Role</th>
-                      <th className="py-2.5 text-[10px] uppercase font-bold text-[var(--th-text-faint)] text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredUsers.map((user) => (
-                      <tr key={user.id} className="border-b last:border-0 hover:bg-neutral-50 dark:hover:bg-neutral-900/40 transition-colors" style={{ borderColor: "var(--th-border)" }}>
-                        <td className="py-3">
-                          <p className="text-xs font-bold text-[var(--th-text-primary)]">{user.name}</p>
-                          <p className="text-[10px] text-[var(--th-text-faint)]">{user.email}</p>
-                        </td>
-                        <td className="py-3 text-xs text-[var(--th-text-secondary)]">
-                          {user.college || "N/A"}
-                        </td>
-                        <td className="py-3 text-xs">
-                          {editingUserId === user.id ? (
-                            <div className="flex items-center gap-1.5">
-                              <select 
-                                value={tempRole}
-                                onChange={(e) => setTempRole(e.target.value as any)}
-                                className="px-2 py-1 rounded border text-[10px] bg-[var(--th-input-bg)] text-[var(--th-text-primary)]"
-                                style={{ borderColor: "var(--th-border-strong)" }}
-                              >
-                                <option value="student">Student</option>
-                                <option value="officer">Officer</option>
-                                <option value="admin">Admin</option>
-                              </select>
-                              <button 
-                                onClick={() => handleRoleChange(user.id, tempRole)}
-                                className="p-1 text-emerald-500 hover:bg-emerald-500/10 rounded cursor-pointer border-0 bg-transparent"
-                              >
-                                <Check size={12} />
-                              </button>
-                            </div>
-                          ) : (
-                            <span 
-                              onClick={() => {
-                                setEditingUserId(user.id);
-                                setTempRole(user.role);
-                              }}
-                              className="cursor-pointer hover:underline flex items-center gap-1 text-[11px]"
-                            >
-                              <Badge variant={user.role === "admin" ? "coral" : user.role === "officer" ? "verdant" : "neutral"}>
-                                {user.role}
-                              </Badge>
-                              <Edit3 size={10} className="opacity-50" />
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-3 text-right">
-                          <button
-                            onClick={() => handleDeleteUser(user.id)}
-                            className="p-1 text-[#FF5C5C] hover:bg-red-500/10 rounded cursor-pointer border-0 bg-transparent"
-                            title="Delete User"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                    {filteredUsers.length === 0 && (
-                      <tr>
-                        <td colSpan={4} className="py-8 text-center text-xs text-[var(--th-text-faint)]">
-                          No users found matching your search.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-
-        </div>
-
+        {ov && ov.users.pendingAdmins > 0 && (
+          <Link href="/pending-colleges">
+            <Button icon={<AlertCircle size={14} />}>
+              {ov.users.pendingAdmins} college{ov.users.pendingAdmins > 1 ? "s" : ""} awaiting approval
+            </Button>
+          </Link>
+        )}
       </div>
+
+      {error && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border p-4 text-sm"
+          style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-card-bg)", color: "var(--th-text-secondary)" }}>
+          <span className="flex items-center gap-2"><AlertCircle size={16} className="text-amber-500" /> {error}</span>
+          <Button variant="secondary" onClick={load}>Retry</Button>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} className="h-28" />)}</div>
+      ) : (
+        <>
+          {/* Platform KPIs */}
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {kpis.map((k) => {
+              const card = (
+                <div className="rounded-2xl border p-5 h-full transition-colors hover:border-[color:var(--th-primary)]" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs" style={{ color: "var(--th-text-secondary)" }}>{k.label}</span>
+                    <div className="w-7 h-7 rounded flex items-center justify-center" style={{ backgroundColor: k.color + "18" }}>
+                      <k.icon size={13} style={{ color: k.color }} />
+                    </div>
+                  </div>
+                  <div className="mt-3 text-2xl font-bold" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
+                    <CountUp end={k.value} />
+                  </div>
+                  {k.sub && <p className="text-[11px] mt-0.5" style={{ color: "var(--th-text-faint)" }}>{k.sub}</p>}
+                </div>
+              );
+              return k.href ? <Link key={k.label} href={k.href}>{card}</Link> : <div key={k.label}>{card}</div>;
+            })}
+          </div>
+
+          {/* Revenue + interview activity */}
+          <div className="grid gap-5 lg:grid-cols-3">
+            <div className="rounded-2xl border p-6 flex flex-col justify-center" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
+              <div className="flex items-center gap-2">
+                <IndianRupee size={14} style={{ color: "var(--th-primary)" }} />
+                <p className="text-xs font-semibold" style={{ color: "var(--th-text-faint)" }}>Monthly recurring revenue</p>
+              </div>
+              <p className="mt-2 text-3xl font-black" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
+                ₹<CountUp end={mrr} />
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2 text-[11px]" style={{ color: "var(--th-text-muted)" }}>
+                <span>Active {Number(subStats?.totalActive ?? 0)}</span>
+                <span>Grace {Number(subStats?.totalGracePeriod ?? 0)}</span>
+                <span>Pending {Number(subStats?.totalPending ?? 0)}</span>
+                <span>Expiring 30d {Number(subStats?.expiringIn30Days ?? 0)}</span>
+              </div>
+            </div>
+
+            <div className="lg:col-span-2 rounded-2xl border p-6" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: "var(--th-text-primary)" }}>
+                  <Activity size={14} /> Interview activity <span className="text-[11px] font-normal" style={{ color: "var(--th-text-faint)" }}>last 30 days</span>
+                </h3>
+                {iv && <span className="text-xs" style={{ color: "var(--th-text-muted)" }}>{iv.totalSessions} sessions · avg {iv.averageScore}</span>}
+              </div>
+              {trend.length >= 2 ? (
+                <ResponsiveContainer width="100%" height={200}>
+                  <AreaChart data={trend} margin={{ top: 4, right: 6, left: -20 }}>
+                    <defs>
+                      <linearGradient id="adminSess" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#0062FF" stopOpacity={0.2} />
+                        <stop offset="95%" stopColor="#0062FF" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--th-border)" vertical={false} />
+                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: "var(--th-text-faint)" }} axisLine={false} tickLine={false} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: "var(--th-text-faint)" }} axisLine={false} tickLine={false} />
+                    <Tooltip contentStyle={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)", borderRadius: 12, fontSize: 11 }} />
+                    <Area dataKey="sessions" name="Sessions" stroke="#0062FF" strokeWidth={2} fill="url(#adminSess)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-xs py-16 text-center" style={{ color: "var(--th-text-faint)" }}>No interview activity in this window yet.</p>
+              )}
+            </div>
+          </div>
+
+          {/* Proctoring health + violations + pending approvals */}
+          <div className="grid gap-5 lg:grid-cols-3">
+            <div className="rounded-2xl border p-6" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
+              <h3 className="text-sm font-bold flex items-center gap-2 mb-4" style={{ color: "var(--th-text-primary)" }}>
+                <ShieldAlert size={14} /> Proctoring health
+              </h3>
+              {pr ? (
+                <div className="space-y-2.5 text-xs">
+                  {[
+                    ["Risk reports", pr.totalReports, "var(--th-text-primary)"],
+                    ["High-risk sessions", pr.highRiskCount, "#F59E0B"],
+                    ["Critical-risk sessions", pr.criticalRiskCount, "#FF5C5C"],
+                    ["Disqualified", pr.disqualifiedCount, "#FF5C5C"],
+                    ["Avg risk score", pr.averageRiskScore, "var(--th-text-primary)"],
+                  ].map(([label, value, color]) => (
+                    <div key={String(label)} className="flex items-center justify-between">
+                      <span style={{ color: "var(--th-text-secondary)" }}>{label}</span>
+                      <span className="font-mono font-bold" style={{ color: color as string }}>{value as number}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : <p className="text-xs" style={{ color: "var(--th-text-faint)" }}>No data.</p>}
+            </div>
+
+            <div className="rounded-2xl border p-6" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
+              <h3 className="text-sm font-bold mb-4" style={{ color: "var(--th-text-primary)" }}>Top integrity flags</h3>
+              {(analytics?.topViolationTypes ?? []).length > 0 ? (
+                <div className="space-y-2">
+                  {analytics!.topViolationTypes.slice(0, 6).map((v) => {
+                    const max = analytics!.topViolationTypes[0].count || 1;
+                    return (
+                      <div key={v._id}>
+                        <div className="flex items-center justify-between text-[11px] mb-0.5" style={{ color: "var(--th-text-secondary)" }}>
+                          <span>{VIOLATION_LABELS[v._id] ?? v._id}</span>
+                          <span className="font-mono">{v.count}</span>
+                        </div>
+                        <div className="h-1.5 rounded-full" style={{ backgroundColor: "var(--th-bg-tertiary)" }}>
+                          <div className="h-full rounded-full" style={{ width: `${(v.count / max) * 100}%`, backgroundColor: "#0062FF" }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : <p className="text-xs" style={{ color: "var(--th-text-faint)" }}>No integrity flags recorded.</p>}
+            </div>
+
+            <div className="rounded-2xl border overflow-hidden" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
+              <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: "var(--th-border)" }}>
+                <h3 className="text-sm font-bold" style={{ color: "var(--th-text-primary)" }}>Pending approvals</h3>
+                <Link href="/pending-colleges" className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline">View all</Link>
+              </div>
+              {pending.length === 0 ? (
+                <p className="p-6 text-center text-xs" style={{ color: "var(--th-text-faint)" }}>All caught up.</p>
+              ) : (
+                pending.map((p) => (
+                  <Link key={p._id ?? p.id} href="/pending-colleges" className="block px-5 py-3 border-b last:border-0 transition-colors hover:bg-black/[0.02] dark:hover:bg-white/[0.02]" style={{ borderColor: "var(--th-border)" }}>
+                    <p className="text-xs font-semibold truncate" style={{ color: "var(--th-text-primary)" }}>{p.organization}</p>
+                    <p className="text-[10px] font-mono truncate" style={{ color: "var(--th-text-faint)" }}>{p.email}</p>
+                  </Link>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-3">
+            <Link href="/pending-colleges"><Button variant="secondary" icon={<ClipboardCheck size={14} />} iconRight={<ArrowRight size={14} />}>Approvals</Button></Link>
+            <Link href="/organizations"><Button variant="secondary" icon={<Building2 size={14} />} iconRight={<ArrowRight size={14} />}>Organizations</Button></Link>
+            <Link href="/students"><Button variant="secondary" icon={<GraduationCap size={14} />} iconRight={<ArrowRight size={14} />}>Students</Button></Link>
+            <Link href="/audit-logs"><Button variant="secondary" icon={<FileText size={14} />} iconRight={<ArrowRight size={14} />}>Audit log</Button></Link>
+          </div>
+        </>
+      )}
     </div>
   );
 }

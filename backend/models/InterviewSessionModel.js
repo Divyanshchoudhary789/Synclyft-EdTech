@@ -21,6 +21,11 @@ const InterviewSessionSchema = new Schema({
     },
     targetRole: { type: String, required: true },
     preferredCodingLanguage: { type: String, required: true },
+    // Ordered list of rounds the candidate selected for this session.
+    selectedRounds: {
+        type: [{ type: String, enum: ['aptitude', 'coding', 'technical', 'hr'] }],
+        default: []
+    },
     status: {
         type: String,
         enum: ['initialized', 'ongoing', 'completed', 'failed'],

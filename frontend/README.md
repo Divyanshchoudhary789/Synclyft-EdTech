@@ -64,3 +64,22 @@ Create **three** Vercel projects, all pointing at this repo:
 
 Backend CORS (`FRONTEND_URL` / `CORS_ALLOWED_ORIGINS`) must list all three deployed origins.
 Cookies are `SameSite=None; Secure` in production (cross-site: Vercel ↔ backend host).
+
+## Route map
+
+**student** — `/` landing · `/login` `/register` `/verify-otp` `/forgot-password` `/reset-password` · `/onboarding` · `/dashboard` `/progress` `/settings` · `/interview/setup` → `/interview/{aptitude,coding,technical,hr}` → `/interview/report` · `/practice/single-round` · `/resume` `/tools/ats-analyzer` `/tools/resumehistory` · `/subscription` `/billing` `/payment/success`
+
+**officer** — `/` B2B landing · `/login` `/register` (college signup → approval) `/forgot-password` `/reset-password` · `/dashboard` + `/dashboard/{students,batches,campaigns,seats,analytics,reports,query,billing,settings}`
+
+**admin** — `/login` · `/dashboard` (platform overview) · `/pending-colleges` `/organizations` `/subscriptions` `/audit-logs`
+
+## Production checklist
+
+- [ ] 3 Vercel projects created, Root Directory set per table above
+- [ ] `NEXT_PUBLIC_Backend_URL` = `https://<backend>/api` on all 3 (the `/api` suffix is required)
+- [ ] Backend: `NODE_ENV=production`, `CORS_ALLOWED_ORIGINS` = the 3 Vercel origins
+- [ ] Backend: `JWT_SECRET` / `SESSION_SECRET` regenerated to 64+ random chars
+- [ ] Backend: Judge0 `JUDGE0_URL` + `JUDGE0_AUTH_TOKEN` point at the Oracle VM
+- [ ] Backend: `SENTRY_DSN` set (optional), `REDIS_URL` is `rediss://` (TLS)
+- [ ] Google/GitHub/LinkedIn OAuth redirect URIs updated to the production backend
+- [ ] Razorpay live keys + webhook URL `https://<backend>/api/webhooks/razorpay`

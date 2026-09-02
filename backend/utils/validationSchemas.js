@@ -85,6 +85,11 @@ const authSchemas = {
   verifySignupOtpCollegeAdmin: Joi.object({
     email: emailSchema,
     otp: Joi.string().required()
+  }),
+
+  changePassword: Joi.object({
+    currentPassword: Joi.string().required(),
+    newPassword: passwordSchema
   })
 };
 
@@ -424,6 +429,7 @@ const reportSchemas = {
     format: Joi.string().valid('pdf', 'csv').default('pdf'),
     from: Joi.string().isoDate().optional(),
     to: Joi.string().isoDate().optional(),
+    days: Joi.number().integer().min(1).max(365).optional(),
     granularity: Joi.string().valid('daily', 'weekly', 'monthly').default('monthly'),
     branch: Joi.string().trim().optional(),
     graduationYear: Joi.number().integer().min(1900).max(2100).optional(),
@@ -440,9 +446,18 @@ const reportSchemas = {
 
   paginationSchema: Joi.object({
     page: Joi.number().min(1).default(1),
-    limit: Joi.number().min(1).max(100).default(10),
+    // Officer roster / seat-allocation views load the whole cohort client-side
+    // for filtering; allow a larger page than the default listing cap.
+    limit: Joi.number().min(1).max(500).default(10),
     sort: Joi.string().optional(),
+    band: Joi.string().valid('all', 'top', 'high', 'mid', 'risk').optional(),
+    branch: Joi.string().optional(),
+    organization: Joi.string().optional(),
     search: Joi.string().optional().trim(),
+    department: Joi.string().optional(),
+    batchName: Joi.string().optional(),
+    graduationYear: Joi.alternatives().try(Joi.number(), Joi.string()).optional(),
+    academicYear: Joi.string().optional(),
     userId: Joi.string().optional(),
     userEmail: Joi.string().optional(),
     userRole: Joi.string().optional(),
@@ -606,7 +621,7 @@ const collegeAdminSchemas = {
       evaluationCriteria: Joi.string().trim().optional().allow('', null),
       testDuration: Joi.number().min(1).optional()
     }).optional(),
-    deadline: Joi.date().required(),
+    deadline: Joi.date().optional(),
     isActive: Joi.boolean().optional(),
     maxStudents: Joi.number().min(1).max(10000).optional()
   }),
@@ -697,6 +712,14 @@ const superAdminSchemas = {
   updateOrganizationStatus: Joi.object({
     status: Joi.string().valid('active', 'inactive', 'suspended', 'pending_verification').optional(),
     isVerified: Joi.boolean().optional()
+  }),
+
+  userIdParam: Joi.object({
+    userId: Joi.string().hex().length(24).required()
+  }),
+
+  updateUserStatus: Joi.object({
+    status: Joi.string().valid('Approved', 'Suspended', 'Rejected', 'Pending').required()
   })
 };
 

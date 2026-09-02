@@ -1,4 +1,5 @@
 const env = require('./config/env.js'); // loads + validates .env before anything else
+const Sentry = require('./config/sentry.js'); // must be first — patches http/express
 
 const express = require('express');
 const http = require('http');
@@ -37,8 +38,7 @@ const {
 const mainRouter = require('./routes/main.router.js');
 const { initSocket } = require("./config/socket.js");
 const initializeProctoringEngine = require('./services/proctorEngine.js');
-const initializeLiveHRPipelineEngine = require("./services/hrVoiceEngine.js");
-const initializeLiveTechnicalPipelineEngine = require("./services/technicalVoiceEngine.js");
+const voiceInterviewEngine = require("./services/voiceInterviewEngine.js");
 const emailProcessor = require("./services/emailProcessor");
 const followUpProcessor = require("./services/followUpProcessor");
 const { initRedis } = require("./config/redis.js");
@@ -116,8 +116,7 @@ mongoose.connect(process.env.MONGODB_URL)
 // Real-time features
 const io = initSocket(server);
 initializeProctoringEngine(io);
-initializeLiveHRPipelineEngine(io);
-initializeLiveTechnicalPipelineEngine(io);
+voiceInterviewEngine.attach(io);
 
 app.get("/", (req, res) => {
     res.status(200).json({
@@ -141,6 +140,11 @@ app.use('/api', mainRouter);
 
 // 404 handler
 app.use(notFoundHandler);
+
+// Report unhandled errors to Sentry (no-op without SENTRY_DSN), then our handler.
+Sentry.setupExpressErrorHandler(app, {
+    shouldHandleError: (error) => (error.statusCode || 500) >= 500,
+});
 
 // Global error handler
 app.use(errorHandler);
@@ -170,12 +174,18 @@ const gracefulShutdown = () => {
 process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
 
+// An uncaught exception leaves the process in an undefined state — log, report,
+// exit and let the platform (Render / nodemon) restart a clean instance.
 process.on('uncaughtException', (error) => {
-    logger.error(`Uncaught exception: ${error.message}`);
-    process.exit(1);
+    logger.error(`Uncaught exception: ${error.stack || error.message}`);
+    Sentry.captureException(error);
+    Sentry.flush(2000).finally(() => process.exit(1));
 });
 
+// An unhandled promise rejection is usually a single failed request path, not a
+// corrupted process — report it and keep serving. (Node's default would only
+// warn; killing the whole server on any stray rejection is worse for uptime.)
 process.on('unhandledRejection', (reason) => {
-    logger.error(`Unhandled rejection: ${reason}`);
-    process.exit(1);
+    logger.error(`Unhandled rejection: ${reason instanceof Error ? reason.stack : String(reason)}`);
+    Sentry.captureException(reason instanceof Error ? reason : new Error(String(reason)));
 });

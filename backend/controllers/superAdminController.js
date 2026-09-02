@@ -328,7 +328,14 @@ const updateOrganizationStatus = async (req, res) => {
 
         if (status !== undefined) organization.status = status;
         if (isVerified !== undefined) organization.isVerified = isVerified;
-        if (isVerified === true) organization.verificationDate = new Date();
+        if (isVerified === true) {
+            organization.verificationDate = new Date();
+            // A freshly verified org should also be operationally active unless the
+            // caller explicitly set another status in the same request.
+            if (status === undefined && ['pending_verification', 'inactive'].includes(organization.status)) {
+                organization.status = 'active';
+            }
+        }
 
         await organization.save();
 
@@ -352,6 +359,93 @@ const updateOrganizationStatus = async (req, res) => {
             message: "Organization status updated successfully.",
             data: organization
         });
+    } catch (err) {
+        logger.error({ message: err.message, stack: err.stack });
+        return sendError(res, err);
+    }
+};
+
+const getPlatformStudents = async (req, res) => {
+    try {
+        const { page, limit, skip } = buildPagination(req.query);
+        const search = (req.query.search || '').trim();
+        const organization = (req.query.organization || '').trim();
+        const status = (req.query.status || '').trim();
+
+        const query = { role: 'student' };
+        if (organization) query.organization = organization;
+        if (status) query.status = status;
+        if (search) {
+            query.$or = [
+                { name: { $regex: search, $options: 'i' } },
+                { email: { $regex: search, $options: 'i' } },
+                { organization: { $regex: search, $options: 'i' } },
+            ];
+        }
+
+        const [students, total] = await Promise.all([
+            User.find(query).select('name email organization status isEmailVerified createdAt').sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+            User.countDocuments(query),
+        ]);
+
+        const profiles = await StudentProfile.find({ user: { $in: students.map((s) => s._id) } })
+            .select('user branch graduationYear placementReadinessScore mockHistoryCount').lean();
+        const pByUser = new Map(profiles.map((p) => [String(p.user), p]));
+
+        const rows = students.map((s) => ({
+            ...s,
+            branch: pByUser.get(String(s._id))?.branch ?? null,
+            graduationYear: pByUser.get(String(s._id))?.graduationYear ?? null,
+            placementReadinessScore: Math.round(pByUser.get(String(s._id))?.placementReadinessScore ?? 0),
+            mockHistoryCount: pByUser.get(String(s._id))?.mockHistoryCount ?? 0,
+        }));
+
+        return res.status(200).json({
+            success: true,
+            message: 'Platform students fetched successfully.',
+            data: rows,
+            pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+        });
+    } catch (err) {
+        logger.error({ message: err.message, stack: err.stack });
+        return sendError(res, err);
+    }
+};
+
+const updateUserStatus = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { status } = req.body;
+
+        const target = await User.findById(userId);
+        if (!target) return res.status(404).json({ message: 'User not found.' });
+        if (target.role === 'super-admin') {
+            return res.status(403).json({ message: 'Super-admin accounts cannot be modified here.' });
+        }
+
+        target.status = status;
+        if (status === 'Suspended' || status === 'Rejected') {
+            // Kill their session so a suspended user is signed out immediately.
+            target.refreshToken = undefined;
+        }
+        await target.save();
+
+        await AuditLog.logAction({
+            user: req.user.id,
+            userEmail: req.user.email || 'system',
+            userRole: 'super-admin',
+            action: 'ADMIN_ACTION',
+            resourceType: 'user',
+            resourceId: target._id,
+            ipAddress: req.ip,
+            userAgent: req.get('user-agent'),
+            endpoint: req.path,
+            method: req.method,
+            statusCode: 200,
+            details: { status, targetRole: target.role },
+        }).catch(() => null);
+
+        return res.status(200).json({ success: true, message: `User marked ${status}.`, data: { _id: target._id, status: target.status } });
     } catch (err) {
         logger.error({ message: err.message, stack: err.stack });
         return sendError(res, err);
@@ -595,4 +689,4 @@ const exportAuditLogs = async (req, res) => {
 };
 
 
-module.exports = { getPendingCollegeAdmins, approveCollegeAdmin, rejectCollegeAdmin, getPlatformOverview, getOrganizations, updateOrganizationStatus, getAuditLogs, getAuditLogById, getAuditLogSummary, exportAuditLogs };
+module.exports = { getPendingCollegeAdmins, approveCollegeAdmin, rejectCollegeAdmin, getPlatformOverview, getOrganizations, updateOrganizationStatus, getAuditLogs, getAuditLogById, getAuditLogSummary, exportAuditLogs, getPlatformStudents, updateUserStatus };

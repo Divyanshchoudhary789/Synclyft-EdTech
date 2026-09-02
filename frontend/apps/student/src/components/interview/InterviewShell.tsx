@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { AdaptivePulse } from "@synclyft/ui/components/AdaptivePulse";
 import { formatTime } from "@synclyft/lib/utils";
 import { useInterviewStore } from "@synclyft/lib/store/interview";
@@ -15,7 +15,12 @@ interface InterviewShellProps {
   questionCounter?: string;
   pulseMode?: "listening" | "speaking" | "processing" | "steady" | "static";
   totalSeconds?: number;
+  /** Server wall-clock deadline (epoch ms). Takes precedence over totalSeconds
+   *  and keeps the countdown accurate across refreshes. */
+  endsAt?: number | null;
   onExit?: () => void;
+  /** Fired once when the round timer reaches zero. */
+  onTimeUp?: () => void;
   showExitConfirm?: boolean;
 }
 
@@ -33,19 +38,28 @@ export function InterviewShell({
   questionCounter,
   pulseMode = "steady",
   totalSeconds = 1800,
+  endsAt = null,
   onExit,
+  onTimeUp,
   showExitConfirm = true,
 }: InterviewShellProps) {
-  const { timer, startTimer, tickTimer, stopTimer, connectionStatus, setConnectionStatus } =
+  const { timer, startTimer, startTimerWithDeadline, tickTimer, stopTimer, connectionStatus, setConnectionStatus } =
     useInterviewStore();
   const [exitModalOpen, setExitModalOpen] = useState(false);
+  const timeUpFired = useRef(false);
+  const timerArmed = timer.isRunning || (endsAt ?? 0) > 0 || totalSeconds > 0;
 
-  // Start timer on mount
+  // Start / re-sync the timer whenever the server deadline (or fallback total) changes.
   useEffect(() => {
-    startTimer(totalSeconds);
     setConnectionStatus("connected");
+    timeUpFired.current = false;
+    if (endsAt && endsAt > 0) {
+      startTimerWithDeadline(endsAt);
+    } else if (totalSeconds > 0) {
+      startTimer(totalSeconds);
+    }
     return () => stopTimer();
-  }, [totalSeconds, startTimer, setConnectionStatus, stopTimer]);
+  }, [endsAt, totalSeconds, startTimer, startTimerWithDeadline, setConnectionStatus, stopTimer]);
 
   // Tick timer
   useEffect(() => {
@@ -53,6 +67,14 @@ export function InterviewShell({
     const interval = setInterval(tickTimer, 1000);
     return () => clearInterval(interval);
   }, [timer.isRunning, tickTimer]);
+
+  // Fire onTimeUp once when the clock hits zero.
+  useEffect(() => {
+    if (timerArmed && timer.isRunning && timer.remaining <= 0 && !timeUpFired.current) {
+      timeUpFired.current = true;
+      onTimeUp?.();
+    }
+  }, [timer.remaining, timer.isRunning, timerArmed, onTimeUp]);
 
   const handleExitClick = useCallback(() => {
     if (showExitConfirm) {

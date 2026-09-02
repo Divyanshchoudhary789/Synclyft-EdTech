@@ -7,7 +7,9 @@
     ".": "./src/index.ts",
     "./components/*": "./src/components/*.tsx",
     "./providers/AppProviders": "./src/providers/AppProviders.tsx",
+    "./ErrorBoundary": "./src/ErrorBoundary.tsx",
     "./auth/LoginForm": "./src/auth/LoginForm.tsx",
+    "./auth/PasswordResetForms": "./src/auth/PasswordResetForms.tsx",
     "./styles/globals.css": "./src/styles/globals.css"
   },
   "dependencies": {

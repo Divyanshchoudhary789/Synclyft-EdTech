@@ -9,7 +9,8 @@ const otpLimiter = require("../middlewares/rateLimiter.js");
 const { validate } = require("../middlewares/validationMiddleware.js");
 const { authSchemas } = require("../utils/validationSchemas.js");
 
-const { googleAuthCallback, linkedinAuthCallback, githubAuthCallback, loginUsingPass, sendLoginOtp, verifyLoginOtp, logout, refreshAccessToken, getCurrentUser, sendSignupOtpForStudent, verifySignupOtpForStudent, sendSignupOtpForCollegeAdmin, verifySignupOtpForCollegeAdmin } = require("../controllers/userController.js");
+const { googleAuthCallback, linkedinAuthCallback, githubAuthCallback, loginUsingPass, sendLoginOtp, verifyLoginOtp, logout, refreshAccessToken, getCurrentUser, resendOtp, changePassword, sendSignupOtpForStudent, verifySignupOtpForStudent, sendSignupOtpForCollegeAdmin, verifySignupOtpForCollegeAdmin } = require("../controllers/userController.js");
+const { authLimiter } = require("../utils/securityUtils.js");
 
 
 // Login with Google(OAuth)
@@ -47,12 +48,16 @@ userRouter.post("/signup/student/verify-otp", validate(authSchemas.verifySignupO
 userRouter.post("/signup/college-admin/send-otp", otpLimiter, validate(authSchemas.sendSignupOtpCollegeAdmin, 'body'), sendSignupOtpForCollegeAdmin);
 userRouter.post("/signup/college-admin/verify-otp", validate(authSchemas.verifySignupOtpCollegeAdmin, 'body'), verifySignupOtpForCollegeAdmin);
 
+// Resend an in-progress signup / login OTP (reuses the stored payload).
+userRouter.post("/otp/resend", otpLimiter, resendOtp);
+
 
 
 userRouter.post("/refresh", refreshAccessToken);
 userRouter.post("/logout", logout);
 
 userRouter.get("/user", isAuthenticated, getCurrentUser);
+userRouter.post("/change-password", isAuthenticated, authLimiter, validate(authSchemas.changePassword, 'body'), changePassword);
 
 
 

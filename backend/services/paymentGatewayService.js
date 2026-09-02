@@ -21,8 +21,16 @@ class PaymentGatewayService {
       logger.info('Razorpay order created', { orderId: order.id, amount });
       return order;
     } catch (error) {
-      logger.error('Failed to create Razorpay order', { error: error.message });
-      throw error;
+      const desc = error?.error?.description || error?.message || 'unknown error';
+      logger.error('Failed to create Razorpay order', { error: desc, statusCode: error?.statusCode });
+      const gatewayError = new Error(
+        error?.statusCode === 401
+          ? 'Payment gateway is not configured correctly (authentication failed).'
+          : `Payment gateway error: ${desc}`
+      );
+      gatewayError.isGatewayError = true;
+      gatewayError.statusCode = 503;
+      throw gatewayError;
     }
   }
 

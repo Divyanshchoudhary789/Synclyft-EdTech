@@ -272,6 +272,14 @@ class SubscriptionController {
         subscriptionId: subscriptionDoc._id
       });
 
+      if (error.isGatewayError) {
+        return res.status(503).json({
+          success: false,
+          code: 'PAYMENT_GATEWAY_UNAVAILABLE',
+          message: 'Payments are temporarily unavailable. Please try again in a few minutes.'
+        });
+      }
+
       return res.status(500).json({
         success: false,
         message: 'Failed to create subscription. Please try again.',
@@ -934,16 +942,31 @@ class SubscriptionController {
     if (status) query.status = status;
 
     const subscriptions = await Subscription.find(query)
-      .populate('organization', 'organizationName email')
       .sort({ createdAt: -1 })
-      .limit(limit)
-      .skip(skip);
+      .limit(Number(limit))
+      .skip(Number(skip))
+      .lean();
 
     const total = await Subscription.countDocuments(query);
 
+    // `organization` is polymorphic: an Organization _id for college plans, a
+    // User _id for individual (student) plans. Resolve a display name for each.
+    const orgIds = subscriptions.map((s) => s.organization).filter(Boolean);
+    const [orgDocs, userDocs] = await Promise.all([
+      Organization.find({ _id: { $in: orgIds } }).select('organizationName').lean(),
+      User.find({ _id: { $in: orgIds } }).select('name email').lean(),
+    ]);
+    const orgById = new Map(orgDocs.map((o) => [String(o._id), o.organizationName]));
+    const userById = new Map(userDocs.map((u) => [String(u._id), u.name || u.email]));
+
+    const withOwner = subscriptions.map((s) => ({
+      ...s,
+      ownerName: orgById.get(String(s.organization)) || userById.get(String(s.organization)) || s.contactEmail || '—',
+    }));
+
     return res.status(200).json({
       success: true,
-      data: subscriptions,
+      data: withOwner,
       pagination: {
         page,
         limit,
@@ -960,6 +983,28 @@ class SubscriptionController {
           _id: '$status',
           count: { $sum: 1 },
           totalRevenue: { $sum: '$amount' }
+        }
+      }
+    ]);
+
+    // Monthly recurring revenue: normalise every active/grace subscription's
+    // amount to a monthly figure regardless of its billing cycle.
+    const mrrAgg = await Subscription.aggregate([
+      { $match: { status: { $in: ['active', 'grace_period'] } } },
+      {
+        $group: {
+          _id: null,
+          mrr: {
+            $sum: {
+              $switch: {
+                branches: [
+                  { case: { $eq: ['$billingCycle', 'yearly'] }, then: { $divide: ['$amount', 12] } },
+                  { case: { $eq: ['$billingCycle', 'quarterly'] }, then: { $divide: ['$amount', 3] } },
+                ],
+                default: '$amount'
+              }
+            }
+          }
         }
       }
     ]);
@@ -982,6 +1027,7 @@ class SubscriptionController {
         totalGracePeriod,
         totalSuspended,
         totalExpired,
+        mrr: Math.round(mrrAgg[0]?.mrr || 0),
         expiringIn30Days: await Subscription.countDocuments({
           status: 'active',
           endDate: {
@@ -1224,6 +1270,14 @@ class SubscriptionController {
 
       logger.error('Individual subscription creation failed', { error: error.message });
 
+      if (error.isGatewayError) {
+        return res.status(503).json({
+          success: false,
+          code: 'PAYMENT_GATEWAY_UNAVAILABLE',
+          message: 'Payments are temporarily unavailable. Please try again in a few minutes.'
+        });
+      }
+
       return res.status(500).json({
         success: false,
         message: 'Failed to create subscription. Please try again.',
@@ -1243,27 +1297,123 @@ class SubscriptionController {
     });
   }
 
+  static async getOrgPlans(req, res) {
+    return res.status(200).json({
+      success: true,
+      data: {
+        plans: SUBSCRIPTION_PLANS
+      }
+    });
+  }
+
   static async getCurrentStudentSubscription(req, res) {
     const userId = req.user.id;
+    const mongoose = require('mongoose');
 
-    const subscription = await Subscription.findOne({
-      organization: userId,
-      ownerType: 'individual',
-      status: { $in: ['active', 'inactive', 'pending', 'grace_period'] }
-    });
+    const [ownSub, user, orgSeat] = await Promise.all([
+      Subscription.findOne({
+        organization: userId,
+        ownerType: 'individual',
+        status: { $in: ['active', 'inactive', 'pending', 'grace_period'] }
+      }),
+      User.findById(userId).select('trials organization'),
+      // A seat allocated by an institution lives on the COLLEGE's subscription.
+      SeatManagement.findOne({
+        'enrolledStudents.student': new mongoose.Types.ObjectId(userId),
+        'enrolledStudents.status': 'active'
+      }).populate('subscription'),
+    ]);
 
-    const seatManagement = subscription
-      ? await SeatManagement.findOne({ subscription: subscription._id })
+    const seatManagement = ownSub
+      ? await SeatManagement.findOne({ subscription: ownSub._id })
       : null;
 
-    const user = await User.findById(userId).select('trials');
+    // The subscription that actually governs this student's access, in priority
+    // order: their own paid plan > an institution-allocated seat > free trial.
+    let entitlement = { source: 'none', active: false };
+    const trials = user?.trials || null;
+
+    const quotaFor = (sub) => {
+      if (!sub) return null;
+      const cap = (limit, usage) => {
+        const max = sub.limits?.[limit];
+        const used = sub.currentMonthUsage?.[usage] ?? 0;
+        return { limit: max ?? 0, used, remaining: max === -1 ? -1 : Math.max(0, (max ?? 0) - used), unlimited: max === -1 };
+      };
+      return {
+        mockInterviews: cap('mockInterviewsPerMonth', 'mockInterviews'),
+        studentReports: cap('studentReportsPerMonth', 'studentReports'),
+      };
+    };
+
+    const govSub = ownSub && (ownSub.isActive() || ownSub.isInGracePeriod())
+      ? ownSub
+      : (orgSeat?.subscription && (orgSeat.subscription.isActive?.() || orgSeat.subscription.isInGracePeriod?.()))
+        ? orgSeat.subscription
+        : null;
+
+    if (govSub === ownSub && ownSub) {
+      entitlement = {
+        source: 'individual',
+        active: true,
+        plan: {
+          planType: ownSub.planType,
+          status: ownSub.status,
+          endDate: ownSub.endDate,
+          billingCycle: ownSub.billingCycle,
+          autoRenew: ownSub.autoRenew,
+          features: ownSub.features,
+          limits: ownSub.limits,
+        },
+        quota: quotaFor(ownSub),
+      };
+    } else if (govSub && orgSeat?.subscription === govSub) {
+      let orgName = null;
+      try {
+        const org = await Organization.findOne({ user: govSub.organization }).select('organizationName');
+        orgName = org?.organizationName || null;
+      } catch { /* best-effort */ }
+      if (!orgName) {
+        const orgUser = await User.findById(govSub.organization).select('organization name');
+        orgName = orgUser?.organization || orgUser?.name || 'your institution';
+      }
+      const enrollment = orgSeat.enrolledStudents.find(
+        (e) => e.student.toString() === userId.toString() && e.status === 'active'
+      );
+      entitlement = {
+        source: 'seat',
+        active: true,
+        seat: {
+          organizationName: orgName,
+          allocatedAt: enrollment?.seatAllocationDate || enrollment?.enrolledAt || null,
+          planType: govSub.planType,
+          endDate: govSub.endDate,
+          features: govSub.features,
+          limits: govSub.limits,
+        },
+        quota: quotaFor(govSub),
+      };
+    } else if (trials?.isActive) {
+      entitlement = {
+        source: 'trial',
+        active: true,
+        trials: {
+          mockInterviews: trials.mockInterviews,
+          studentReports: trials.studentReports,
+          aiEvaluation: trials.aiEvaluation,
+        },
+      };
+    } else if (ownSub && ownSub.status === 'pending') {
+      entitlement = { source: 'pending', active: false, plan: { planType: ownSub.planType, status: 'pending' } };
+    }
 
     return res.status(200).json({
       success: true,
       data: {
-        subscription: subscription || null,
+        subscription: ownSub || null,
         seatManagement,
-        trials: user ? user.trials : null
+        trials,
+        entitlement,
       }
     });
   }

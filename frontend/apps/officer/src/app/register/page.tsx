@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { motion } from "framer-motion";
 import { ArrowRight, CheckCircle2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { api, toApiError } from "@synclyft/lib/api";
@@ -58,14 +57,22 @@ export default function OfficerRegisterPage() {
     }
   };
 
+  const resendOtp = async () => {
+    if (!details) return;
+    try {
+      await api.post("/auth/otp/resend", { email: details.email, type: "Signup" });
+      toast.success("Code resent");
+    } catch (err) {
+      toast.error(toApiError(err).message);
+    }
+  };
+
   return (
     <div
       className="flex min-h-screen items-center justify-center px-4 py-10"
       style={{ backgroundColor: "var(--th-bg)", color: "var(--th-text-primary)" }}
     >
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
+      <div
         className="w-full max-w-[420px] rounded-2xl border p-6 shadow-xl"
         style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-bg-secondary)" }}
       >
@@ -135,13 +142,10 @@ export default function OfficerRegisterPage() {
             >
               {busy ? "Verifying…" : "Verify & create account"}
             </button>
-            <button
-              onClick={() => setStep("details")}
-              className="w-full text-center text-xs"
-              style={{ color: "var(--th-text-muted)" }}
-            >
-              ← Change details
-            </button>
+            <div className="flex items-center justify-between text-xs" style={{ color: "var(--th-text-muted)" }}>
+              <button onClick={() => setStep("details")}>← Change details</button>
+              <button onClick={resendOtp} className="font-semibold" style={{ color: "var(--th-primary)" }}>Resend code</button>
+            </div>
           </div>
         )}
 
@@ -168,7 +172,7 @@ export default function OfficerRegisterPage() {
             Sign in
           </Link>
         </p>
-      </motion.div>
+      </div>
     </div>
   );
 }

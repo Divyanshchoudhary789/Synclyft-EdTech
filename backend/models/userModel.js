@@ -47,7 +47,7 @@ const userSchema = new Schema({
     },
     status: {
         type: String,
-        enum: ['Pending', 'Approved', 'Rejected'],
+        enum: ['Pending', 'Approved', 'Rejected', 'Suspended'],
         default: 'Approved' // for students
     },
     approvedAt: {

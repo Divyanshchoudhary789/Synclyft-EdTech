@@ -562,4 +562,38 @@ Return ONLY a strict JSON object (no markdown, no code fences) in exactly this s
 };
 
 
-module.exports = { analyzeAptitudeResponse, analyzeCodingResponse, analyzeTechnicalResponse, analyzeHrResponse, compileFinalReportCard, analyzeResumeATS, analyzeResumeFromText }
+/**
+ * Placement-cell natural-language Q&A. Answers a college admin's free-text
+ * question grounded ONLY in the aggregated snapshot of their own cohort's data.
+ * Returns a short, plain-text answer (no markdown, no JSON).
+ */
+const answerCollegeQuery = async ({ question, snapshot }) => {
+    try {
+        if (!process.env.GEMINI_API_KEY) {
+            throw new Error('GEMINI_API_KEY is not configured');
+        }
+
+        const prompt = `You are the placement-cell analytics assistant for a college. Answer the placement officer's question using ONLY the JSON data snapshot below — it is the officer's own cohort. Be concrete: cite specific numbers, batch names and student names from the data. If the data does not contain the answer, say so plainly. Keep it under 150 words, plain text, no markdown headings or bullet symbols.
+
+DATA SNAPSHOT:
+${JSON.stringify(snapshot)}
+
+OFFICER'S QUESTION: ${question}
+
+ANSWER:`;
+
+        const res = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+
+        const text = (res.text || '').trim();
+        if (!text) throw new Error('Empty model response');
+        return text;
+    } catch (e) {
+        logger.error('Gemini answerCollegeQuery error:', e);
+        throw e;
+    }
+};
+
+module.exports = { analyzeAptitudeResponse, analyzeCodingResponse, analyzeTechnicalResponse, analyzeHrResponse, compileFinalReportCard, analyzeResumeATS, analyzeResumeFromText, answerCollegeQuery }

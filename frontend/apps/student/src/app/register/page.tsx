@@ -1,5 +1,6 @@
 "use client";
 
+import toast from "react-hot-toast";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useState, useEffect } from "react";
@@ -52,11 +53,10 @@ const itemVariants = {
 export default function RegisterPage() {
   const router = useRouter();
   const [accountType, setAccountType] = useState<"student" | "company">("student");
-  const [step, setStep] = useState<"form" | "otp">("form");
+  const [step] = useState<"form" | "otp">("form");
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [focused, setFocused] = useState<string | null>(null);
-  const [enteredOtp, setEnteredOtp] = useState("");
 
   const { theme } = useTheme();
   const isDark = theme === "dark";
@@ -107,44 +107,29 @@ export default function RegisterPage() {
 
   const onSubmit = async (_data: FormData) => {
     setLoading(true);
-    console.log(`data`, _data);
     const endpoint = accountType === "company"
-      ? "auth/signup/college-admin/send-otp"
-      : "auth/signup/student/send-otp";
+      ? "/auth/signup/college-admin/send-otp"
+      : "/auth/signup/student/send-otp";
 
     try {
-      const res = await api.post(endpoint, {
+      await api.post(endpoint, {
         email: _data.email,
         name: _data.name,
         organization: _data.college,
-        college: _data.college,
-        collegeName: _data.college,
-        password: _data.password
+        password: _data.password,
       });
-      console.log('res: ', res);
-      if (res.status === 200) {
-        sessionStorage.setItem("email", _data.email);
-        sessionStorage.setItem("signup_name", _data.name);
-        sessionStorage.setItem("signup_organization", _data.college);
-        sessionStorage.setItem("signup_password", _data.password);
-        sessionStorage.setItem("account_type", accountType);
-        router.push("/verify-otp");
-      }
-    } catch (error: any) {
-      console.error("Signup failed:", error);
-      const errMsg = error.response?.data?.message || error.response?.data?.error || "Registration failed. Please check your inputs.";
-      alert(errMsg);
+      // Only the email is kept — resend re-uses the server-side OTP payload.
+      sessionStorage.setItem("email", _data.email);
+      sessionStorage.setItem("account_type", accountType);
+      router.push("/verify-otp");
+    } catch (error) {
+      toast.error(
+        (error as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+          "Registration failed. Please check your inputs."
+      );
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleVerifyOtp = async () => {
-    if (enteredOtp.length !== 6) return;
-    setLoading(true);
-    await new Promise((r) => setTimeout(r, 1000));
-    setLoading(false);
-    router.push("/onboarding");
   };
 
   if (!mounted) return null;
@@ -204,7 +189,7 @@ export default function RegisterPage() {
           <div className="flex items-center justify-center">
             <motion.div
               variants={containerVariants}
-              initial="hidden"
+              initial={false}
               animate="show"
               className={cn('w-full', 'max-w-[420px]', 'p-5', 'md:p-6', 'rounded-2xl', 'backdrop-blur-md', 'border', 'shadow-2xl', 'transition-all', 'duration-300')}
               style={{
@@ -212,7 +197,7 @@ export default function RegisterPage() {
                 borderColor: isDark ? "rgba(51, 65, 85, 0.3)" : "rgba(255, 255, 255, 0.5)",
               }}
             >
-              <AnimatePresence mode="wait">
+              <AnimatePresence mode="wait" initial={false}>
                 {step === "form" ? (
                   <motion.div
                     key="register-form"
@@ -459,111 +444,7 @@ export default function RegisterPage() {
                       </motion.div>
                     </form>
                   </motion.div>
-                ) : (
-                  <motion.div
-                    key="otp-step"
-                    initial={{ opacity: 0, x: 20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -20 }}
-                    transition={{ duration: 0.2 }}
-                    className="space-y-5"
-                  >
-                    {/* Header */}
-                    <motion.div variants={itemVariants} className="space-y-2">
-                      <h2
-                        className={cn('text-2xl', 'font-extrabold', 'tracking-tight')}
-                        style={{
-                          fontFamily: "var(--font-inter-tight), sans-serif",
-                          color: "var(--th-text-primary)",
-                        }}
-                      >
-                        Verify your email 📧
-                      </h2>
-                      <p className={cn('text-sm', 'leading-relaxed')} style={{ color: "var(--th-text-secondary)" }}>
-                        We have sent a verification code to your email. Enter the code below to complete your registration.
-                      </p>
-                    </motion.div>
-
-                    {/* Alert info */}
-                    <motion.div
-                      variants={itemVariants}
-                      className={cn('p-4', 'border', 'rounded-xl', 'text-center')}
-                      style={{
-                        backgroundColor: "var(--th-bg-secondary)",
-                        borderColor: "var(--th-border)",
-                      }}
-                    >
-                      <p className={cn('text-xs')} style={{ color: "var(--th-text-muted)" }}>
-                        Code sent. Valid for 10 minutes.
-                      </p>
-                    </motion.div>
-
-                    {/* OTP Input */}
-                    <motion.div variants={itemVariants} className="space-y-1.5">
-                      <label className={cn('text-[0.7rem]', 'font-semibold', 'uppercase', 'tracking-widest')} style={{ color: "var(--th-text-muted)" }}>Verification Code</label>
-                      <motion.div
-                        animate={{ boxShadow: focused === "otp" ? "0 0 0 2px rgba(0,98,255,0.25)" : "0 0 0 0px transparent" }}
-                        className="rounded-xl"
-                      >
-                        <input
-                          value={enteredOtp}
-                          onChange={(e) => setEnteredOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                          onFocus={() => setFocused("otp")}
-                          onBlur={() => setFocused(null)}
-                          className={cn('w-full', 'border', 'rounded-xl', 'px-4', 'py-3.5', 'text-center', 'text-xl', 'font-mono', 'tracking-[0.4em]', 'placeholder-[#363C47]', 'outline-none', 'transition-colors')}
-                          style={{
-                            backgroundColor: isDark ? "rgba(10, 15, 29, 0.4)" : "rgba(255, 255, 255, 0.5)",
-                            borderColor: focused === "otp" ? "var(--th-primary)" : "var(--th-input-border)",
-                            color: "var(--th-text-primary)",
-                          }}
-                          placeholder="000000"
-                          maxLength={6}
-                        />
-                      </motion.div>
-                    </motion.div>
-
-                    {/* Verify button */}
-                    <motion.div variants={itemVariants} className="space-y-3">
-                      <motion.button
-                        onClick={handleVerifyOtp}
-                        disabled={loading || enteredOtp.length !== 6}
-                        whileHover={!(loading || enteredOtp.length !== 6) ? { scale: 1.015, boxShadow: "0 8px 30px rgba(0,98,255,0.25)" } : {}}
-                        whileTap={!(loading || enteredOtp.length !== 6) ? { scale: 0.98 } : {}}
-                        className={cn('w-full', 'flex', 'items-center', 'justify-center', 'gap-2', 'disabled:opacity-50', 'disabled:cursor-not-allowed', 'text-white', 'font-semibold', 'text-sm', 'py-3', 'px-6', 'rounded-xl', 'transition-colors')}
-                        style={{
-                          backgroundColor: "var(--th-primary)",
-                        }}
-                      >
-                        {loading ? (
-                          <span className={cn('flex', 'items-center', 'gap-2')}>
-                            <svg className={cn('animate-spin', 'h-4', 'w-4')} viewBox="0 0 24 24" fill="none">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                            </svg>
-                            Verifying...
-                          </span>
-                        ) : (
-                          <span className={cn('flex', 'items-center', 'gap-2')}>
-                            Verify & Continue <ArrowRight size={14} />
-                          </span>
-                        )}
-                      </motion.button>
-
-                      <button
-                        type="button"
-                        onClick={() => setStep("form")}
-                        className={cn('w-full', 'flex', 'items-center', 'justify-center', 'gap-2', 'border', 'font-semibold', 'text-sm', 'py-3', 'px-6', 'rounded-xl', 'transition-colors')}
-                        style={{
-                          backgroundColor: "var(--th-bg-secondary)",
-                          borderColor: "var(--th-border)",
-                          color: "var(--th-text-primary)",
-                        }}
-                      >
-                        <ArrowLeft size={14} /> Back to details
-                      </button>
-                    </motion.div>
-                  </motion.div>
-                )}
+                ) : null}
               </AnimatePresence>
 
               {/* Trust badges */}

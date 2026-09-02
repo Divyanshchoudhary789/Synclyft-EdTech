@@ -1,12 +1,16 @@
 'use client';
 import React, { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { io } from 'socket.io-client';
+import toast from 'react-hot-toast';
 import { AudioStreamer } from '../utils/audioStreamer';
 
-export default function HRInterviewScreen({ sessionId, roundId, simliSessionToken }) {
-    const router = useRouter();
-    
+const SOCKET_URL =
+  process.env.NEXT_PUBLIC_SOCKET_URL ||
+  (process.env.NEXT_PUBLIC_Backend_URL || '').replace(/\/api\/?$/, '') ||
+  'http://localhost:8080';
+
+export default function HRInterviewScreen({ sessionId, roundId, simliSessionToken, onComplete }) {
+
     // UI Local States
     const [isConnecting, setIsConnecting] = useState(true);
     const [interviewEnded, setInterviewEnded] = useState(false);
@@ -20,8 +24,9 @@ export default function HRInterviewScreen({ sessionId, roundId, simliSessionToke
 
     useEffect(() => {
         // 1. Establish high fidelity socket connection interface targeting backend port 8080
-        socketRef.current = io('https://ed-tech-backend-0awj.onrender.com', {
+        socketRef.current = io(SOCKET_URL, {
             transports: ['websocket'],
+            withCredentials: true,
             forceNew: true
         });
 
@@ -36,9 +41,6 @@ export default function HRInterviewScreen({ sessionId, roundId, simliSessionToke
 
         // 3. Socket Lifecycle Registration Loops
         socketRef.current.on('connect', () => {
-            console.log("[Socket Channel Mounted]: ID ->", socketRef.current.id);
-            
-            // Join active corporate verification room stream state matrices
             socketRef.current.emit('join-hr-live-stream', {
                 sessionId,
                 roundId,
@@ -52,19 +54,14 @@ export default function HRInterviewScreen({ sessionId, roundId, simliSessionToke
         });
 
         // AUTOMATION HOOK LINK: 
-        socketRef.current.on('live-hr-session-terminated', (data) => {
-            console.log("[Session Ended Trigger Alert]: Compiling report maps data for ->", data.sessionId);
+        socketRef.current.on('live-hr-session-terminated', () => {
             setInterviewEnded(true);
-            
-            // Release device mic and video context traces gracefully
             if (streamerRef.current) streamerRef.current.stopStreaming();
-            
-            // Redirection to your central diagnostic report template layout
-            router.push(`/student/interviews/dashboard/${data.sessionId}`);
+            setTimeout(() => onComplete?.(), 2000);
         });
 
         socketRef.current.on('error-alert', (errorData) => {
-            alert(`Platform Exception: ${errorData.msg}`);
+            toast.error(errorData?.msg || 'Voice service error');
         });
 
         // Simli Custom PostMessage Listeners to dynamically track if AI avatar is currently speaking
@@ -82,7 +79,7 @@ export default function HRInterviewScreen({ sessionId, roundId, simliSessionToke
                 socketRef.current.disconnect();
             }
         };
-    }, [sessionId, roundId, simliSessionToken, router]);
+    }, [sessionId, roundId, simliSessionToken, onComplete]);
 
     return (
         <div className="min-h-screen bg-slate-950 text-white flex flex-col p-6 font-sans">

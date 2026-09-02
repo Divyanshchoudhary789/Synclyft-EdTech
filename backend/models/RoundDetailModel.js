@@ -19,6 +19,8 @@ const QuestionEvaluationSchema = new Schema({
         totalTestCases: { type: Number, default: 0 },
         runtimeMs: { type: Number, default: 0 },
         memoryKb: { type: Number, default: 0 },
+        timeComplexity: { type: String, default: '' },
+        spaceComplexity: { type: String, default: '' },
         statusDescription: { type: String, default: 'Unattempted' }
     },
     evaluationLayers: {
@@ -44,9 +46,17 @@ const RoundDetailSchema = new Schema({
     durationSeconds: { type: Number },
     // true when the round was closed automatically because time ran out.
     forceEnded: { type: Boolean, default: false },
-    endedAt: { type: Date }
+    endedAt: { type: Date },
+
+    // External provider (aptitude / coding model) batch session id, kept so a
+    // client refresh can resume the round without re-initialising the provider.
+    providerSessionId: { type: String, default: '' },
+    aptitudeTopics: [{ type: String }]
 }, { timestamps: true });
 
+// One round document per (session, roundType). Prevents duplicate-node crashes
+// from concurrent question fetches.
+RoundDetailSchema.index({ session: 1, roundType: 1 }, { unique: true });
 // Supports the DB fallback cron that finalizes overdue, still-active rounds.
 RoundDetailSchema.index({ status: 1, endsAt: 1 });
 

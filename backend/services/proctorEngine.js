@@ -1,6 +1,7 @@
 const { PutObjectCommand } = require("@aws-sdk/client-s3");
-const { s3 } = require("../config/cloudflare-config.js"); 
+const { s3 } = require("../config/cloudflare-config.js");
 const ProctorSessionReport = require("../models/ProctorSessionReportModel.js");
+const { verifySocketSession } = require("../utils/socketAuth.js");
 const logger = require("../services/loggerService.js");
 
 const VIOLATION_CONFIG = {
@@ -47,25 +48,37 @@ function initializeProctoringEngine(io) {
         for (let socketId of Object.keys(activeLiveSessions)) {
             let liveData = activeLiveSessions[socketId];
             if (liveData.currentScore > 0) {
-                liveData.currentScore = Math.max(0, Math.floor(liveData.currentScore * 0.95) - 1);
-                io.to(socketId).emit('RISK_SCORE_UPDATE', { 
-                    riskScore: liveData.currentScore, 
-                    message: "Score slightly decayed due to consistent compliant performance." 
-                });
+                const next = Math.max(0, Math.floor(liveData.currentScore * 0.93));
+                if (next !== liveData.currentScore) {
+                    liveData.currentScore = next;
+                    // Silent decay — no toast message, just the updated gauge.
+                    io.to(socketId).emit('RISK_SCORE_UPDATE', { riskScore: next, message: "", decay: true });
+                    ProctorSessionReport.updateOne(
+                        { session: liveData.sessionId },
+                        { $set: { cumulativeRiskScore: next } }
+                    ).catch(() => {});
+                }
             }
         }
     }, 15000);
 
     io.on('connection', (socket) => {
-        socket.on('START_PROCTORING', async ({ sessionId, candidateId }) => {
+        socket.on('START_PROCTORING', async ({ sessionId }) => {
             try {
+                const auth = await verifySocketSession(socket, sessionId);
+                if (!auth.ok) {
+                    socket.emit('PROCTORING_ERROR', { reason: auth.reason });
+                    return;
+                }
+                const candidateId = String(socket.user._id);
+
                 let report = await ProctorSessionReport.findOne({ session: sessionId });
                 if (!report) {
-                    report = await ProctorSessionReport.create({ 
-                        session: sessionId, 
-                        candidateId, 
-                        cumulativeRiskScore: 0, 
-                        violationsLog: [] 
+                    report = await ProctorSessionReport.create({
+                        session: sessionId,
+                        candidateId,
+                        cumulativeRiskScore: 0,
+                        violationsLog: []
                     });
                 }
 
@@ -75,13 +88,14 @@ function initializeProctoringEngine(io) {
                     currentScore: report.cumulativeRiskScore,
                     throttleMap: {}
                 };
-                
-                socket.emit('PROCTORING_INITIALIZED', { 
-                    status: 'secure', 
-                    currentScore: report.cumulativeRiskScore 
+
+                socket.emit('PROCTORING_INITIALIZED', {
+                    status: 'secure',
+                    currentScore: report.cumulativeRiskScore
                 });
             } catch (error) {
                 logger.error("Proctoring initialization error:", error);
+                socket.emit('PROCTORING_ERROR', { reason: 'init_failed' });
             }
         });
 

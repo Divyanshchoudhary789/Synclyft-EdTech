@@ -6,5 +6,8 @@ export { Logo } from "./components/Logo";
 export { SkeletonBlock, SkeletonCard } from "./components/SkeletonBlock";
 export { ThemeToggle } from "./components/ThemeToggle";
 export { AppProviders } from "./providers/AppProviders";
+export { ErrorBoundary } from "./ErrorBoundary";
 export { LoginForm } from "./auth/LoginForm";
 export type { LoginFormProps } from "./auth/LoginForm";
+export { ForgotPasswordForm, ResetPasswordForm } from "./auth/PasswordResetForms";
+export { GoogleIcon, GithubIcon, LinkedinIcon, OAUTH_PROVIDERS } from "./auth/brandIcons";

@@ -1,221 +1,291 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@synclyft/ui/components/Button";
-import { api } from "@synclyft/lib/api";
-import { Shield, Building, Mail, Globe, Users, Save, Check } from "lucide-react";
+import { Badge } from "@synclyft/ui/components/Badge";
+import { SkeletonBlock } from "@synclyft/ui/components/SkeletonBlock";
+import { api, toApiError } from "@synclyft/lib/api";
+import { authService, notificationService } from "@synclyft/lib/api/services";
+import { planLabel } from "@synclyft/lib/utils";
+import { useAuthStore } from "@synclyft/lib/store/auth";
+import toast from "react-hot-toast";
+import { Building2, Shield, KeyRound, Bell } from "lucide-react";
 
-interface OrganizationData {
-  name: string;
+interface Form {
+  organizationName: string;
+  organizationType: string;
+  registrationNumber: string;
+  phone: string;
+  website: string;
+  contactName: string;
   contactEmail: string;
-  allowedDomains: string[];
-  studentLimit: number;
-  subscription: string;
-  status: string;
-  address: string;
-  autoApprove: boolean;
+  contactDesignation: string;
+  city: string;
+  state: string;
+  country: string;
 }
 
-export default function SettingsPage() {
-  const [orgData, setOrgData] = useState<OrganizationData>({
-    name: "",
-    contactEmail: "",
-    allowedDomains: [],
-    studentLimit: 0,
-    subscription: "",
-    status: "",
-    address:"",
-    autoApprove: false,
-  });
+const EMPTY: Form = {
+  organizationName: "", organizationType: "college", registrationNumber: "", phone: "", website: "",
+  contactName: "", contactEmail: "", contactDesignation: "", city: "", state: "", country: "India",
+};
 
+export default function OfficerSettingsPage() {
+  const { logout } = useAuthStore();
+  const [form, setForm] = useState<Form>(EMPTY);
+  const [meta, setMeta] = useState<{ status?: string; subscription?: string; seats?: number }>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [success, setSuccess] = useState(false);
 
   useEffect(() => {
-    const fetchOrg = async () => {
-      setLoading(true);
+    (async () => {
       try {
-        const res = await api.get("college-admin/organization/me");
-        console.log("Org settings fetched:", res.data);
-        if (res.data) {
-          setOrgData({
-            name: res.data.data.organization.organizationName || res.data.organization || "",
-            contactEmail: res.data.data.organization.primaryContactPerson.email || res.data.email || "",
-            allowedDomains: res.data.allowedDomains || (res.data.domain ? [res.data.domain] : []),
-            studentLimit: res.data.data.seatManagement || res.data.seatsLimit || 0,
-            subscription: res.data.data.subscription || res.data.subscription || "",
-            status: res.data.data.status || res.data.status || "",
-            address:res.data.data.organization.address.country || res.data.address || "",
-            autoApprove: res.data.autoApprove ?? false,
-          });
-        }
+        const res = await api.get("/college-admin/organization/me");
+        const ctx = (res.data?.data ?? res.data) as Record<string, unknown>;
+        const org = (ctx.organization ?? {}) as Record<string, unknown>;
+        const contact = (org.primaryContactPerson ?? {}) as Record<string, unknown>;
+        const address = (org.address ?? {}) as Record<string, unknown>;
+        const sub = (ctx.subscription ?? {}) as Record<string, unknown>;
+        const seatMgmt = (ctx.seatManagement ?? {}) as Record<string, unknown>;
+        setForm({
+          organizationName: String(org.organizationName ?? ""),
+          organizationType: String(org.organizationType ?? "college"),
+          registrationNumber: String(org.registrationNumber ?? ""),
+          phone: String(org.phone ?? ""),
+          website: String(org.website ?? ""),
+          contactName: String(contact.name ?? ""),
+          contactEmail: String(contact.email ?? ""),
+          contactDesignation: String(contact.designation ?? ""),
+          city: String(address.city ?? ""),
+          state: String(address.state ?? ""),
+          country: String(address.country ?? "India"),
+        });
+        setMeta({
+          status: String(org.status ?? ctx.status ?? ""),
+          subscription: planLabel(sub.planType as string),
+          seats: Number(seatMgmt.totalSeatsAllocated ?? 0),
+        });
       } catch (err) {
-        console.error("Failed to load organization settings:", err);
+        toast.error(toApiError(err).message);
       } finally {
         setLoading(false);
       }
-    };
-    fetchOrg();
+    })();
   }, []);
 
-  const handleSave = async (e: React.FormEvent) => {
+  const save = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!form.contactName.trim()) return toast.error("Primary contact name is required");
     setSaving(true);
-    setSuccess(false);
     try {
-      await api.patch("college-admin/organization/me", orgData);
-      setSuccess(true);
-      setTimeout(() => setSuccess(false), 3000);
+      await api.put("/college-admin/update/organization/me", {
+        organizationName: form.organizationName,
+        organizationType: form.organizationType,
+        registrationNumber: form.registrationNumber,
+        phone: form.phone,
+        website: form.website || undefined,
+        address: { city: form.city, state: form.state, country: form.country },
+        primaryContactPerson: {
+          name: form.contactName,
+          email: form.contactEmail,
+          designation: form.contactDesignation,
+        },
+      });
+      toast.success("Organization details saved");
     } catch (err) {
-      console.error("Failed to save organization settings:", err);
-      setSuccess(true);
-      setTimeout(() => setSuccess(false), 3000);
+      toast.error(toApiError(err).message);
     } finally {
       setSaving(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="p-6 md:p-8 text-center text-xs text-[var(--th-text-faint)]">
-        Loading organization settings...
-      </div>
-    );
-  }
+  const field = (label: string, key: keyof Form, opts: { type?: string; required?: boolean } = {}) => (
+    <div className="space-y-1.5">
+      <label className="text-[10px] uppercase font-bold" style={{ color: "var(--th-text-faint)" }}>{label}</label>
+      <input
+        type={opts.type ?? "text"}
+        value={form[key]}
+        required={opts.required}
+        onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+        className="w-full px-3 py-2 rounded-lg border text-xs"
+        style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }}
+      />
+    </div>
+  );
 
   return (
-    <div className="p-6 md:p-8 space-y-7 text-left">
+    <div className="p-6 md:p-8 max-w-3xl mx-auto space-y-6">
       <div>
-        <p className="label-caption mb-1" style={{ color: "var(--th-text-secondary)" }}>Officer Portal</p>
-        <h1
-          className="text-[1.75rem] font-bold tracking-tight"
-          style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}
-        >
-          Settings
+        <h1 className="text-lg font-semibold flex items-center gap-2" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
+          <Building2 size={18} /> Organization settings
         </h1>
+        <p className="text-xs" style={{ color: "var(--th-text-faint)" }}>Your institute profile and placement-cell contact</p>
       </div>
 
-      <div className="grid lg:grid-cols-12 gap-8 items-start">
-        <form onSubmit={handleSave} className="lg:col-span-8 space-y-6">
-          <div className="card-light p-6 space-y-6" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
-            <div className="flex items-center gap-2 border-b pb-3" style={{ borderColor: "var(--th-border)" }}>
-              <Building size={18} className="text-[#0062FF]" />
-              <h2 className="text-sm font-bold text-[var(--th-text-primary)]">Organization Profile</h2>
+      {loading ? (
+        <div className="space-y-3"><SkeletonBlock height="h-9" /><SkeletonBlock height="h-9" /><SkeletonBlock height="h-9" /></div>
+      ) : (
+        <>
+          <div className="rounded-2xl border p-5 flex flex-wrap gap-4 text-sm" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
+            <div>
+              <p className="text-[10px] uppercase font-bold" style={{ color: "var(--th-text-faint)" }}>Status</p>
+              <Badge variant={meta.status === "verified" || meta.status === "Approved" ? "verdant" : "amber"}>{meta.status || "pending"}</Badge>
             </div>
+            <div>
+              <p className="text-[10px] uppercase font-bold" style={{ color: "var(--th-text-faint)" }}>Plan</p>
+              <p style={{ color: "var(--th-text-primary)" }}>{meta.subscription}</p>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase font-bold" style={{ color: "var(--th-text-faint)" }}>Seats allocated</p>
+              <p style={{ color: "var(--th-text-primary)" }}>{meta.seats ?? 0}</p>
+            </div>
+          </div>
 
+          <form onSubmit={save} className="rounded-2xl border p-6 space-y-5" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
             <div className="grid sm:grid-cols-2 gap-4">
-              {/* Org Name */}
+              {field("Institute name", "organizationName")}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-[var(--th-text-secondary)]">Organization Name</label>
-                <input
-                  type="text"
-                  value={JSON.parse(JSON.stringify(orgData)).name}
-                  onChange={(e) => setOrgData({ ...orgData, name: e.target.value })}
-                  className="input-light !text-xs"
-                  required
-                />
+                <label className="text-[10px] uppercase font-bold" style={{ color: "var(--th-text-faint)" }}>Type</label>
+                <select value={form.organizationType} onChange={(e) => setForm((f) => ({ ...f, organizationType: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg border text-xs"
+                  style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }}>
+                  {["college", "university", "institute", "training_center"].map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
               </div>
-
-              {/* Contact Email */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-[var(--th-text-secondary)]">Contact Email</label>
-                <input
-                  type="email"
-                  value={orgData.contactEmail}
-                  onChange={(e) => setOrgData({ ...orgData, contactEmail: e.target.value })}
-                  className="input-light !text-xs"
-                  required
-                />
-              </div>
-
-              {/* Allowed Domains */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-[var(--th-text-secondary)]">Allowed Email Domains</label>
-                <input
-                  type="text"
-                  value={orgData.allowedDomains.join(", ")}
-                  onChange={(e) => setOrgData({ ...orgData, allowedDomains: e.target.value.split(",").map(d => d.trim()) })}
-                  className="input-light !text-xs"
-                  placeholder="domain.edu, company.com"
-                  required
-                />
-              </div>
-
-              {/* Student Limit */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-[var(--th-text-secondary)]">Max Student Capacity</label>
-                <input
-                  type="number"
-                  value={orgData.studentLimit}
-                  onChange={(e) => setOrgData({ ...orgData, studentLimit: parseInt(e.target.value) || 0 })}
-                  className="input-light !text-xs"
-                  disabled
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-[var(--th-text-secondary)]">Address</label>
-                <input
-                  type="text"
-                  value={orgData.address}
-                  onChange={(e) => setOrgData({ ...orgData, address: e.target.value })}
-                  className="input-light !text-xs"
-                  placeholder="Organization Address"
-                  required
-                />
+              {field("Registration number", "registrationNumber")}
+              {field("Phone", "phone")}
+              {field("Website", "website", { type: "url" })}
+              {field("City", "city")}
+              {field("State", "state")}
+              {field("Country", "country")}
+            </div>
+            <div className="pt-4 border-t" style={{ borderColor: "var(--th-border)" }}>
+              <p className="text-xs font-semibold mb-3" style={{ color: "var(--th-text-primary)" }}>Primary contact</p>
+              <div className="grid sm:grid-cols-3 gap-4">
+                {field("Name", "contactName", { required: true })}
+                {field("Email", "contactEmail", { type: "email" })}
+                {field("Designation", "contactDesignation")}
               </div>
             </div>
+            <div className="flex justify-between items-center pt-2">
+              <button type="button" onClick={() => logout()} className="text-xs flex items-center gap-1.5" style={{ color: "var(--th-text-faint)" }}>
+                <Shield size={12} /> Sign out
+              </button>
+              <Button type="submit" loading={saving}>Save changes</Button>
+            </div>
+          </form>
 
-            {/* Auto-approve registrations */}
-            <div className="flex items-center justify-between pt-4 border-t" style={{ borderColor: "var(--th-border)" }}>
-              <div>
-                <p className="text-xs font-semibold text-[var(--th-text-primary)]">Auto-Approve Students</p>
-                <p className="text-[10px] text-[var(--th-text-faint)]">Automatically approve student accounts with matching email domains.</p>
-              </div>
-              <input
-                type="checkbox"
-                checked={orgData.autoApprove}
-                onChange={(e) => setOrgData({ ...orgData, autoApprove: e.target.checked })}
-                className="w-4 h-4 rounded accent-[#0062FF] cursor-pointer"
-              />
-            </div>
-
-            {/* Save Controls */}
-            <div className="flex items-center gap-3 pt-2">
-              <Button type="submit" disabled={saving} icon={success ? <Check size={14} /> : <Save size={14} />}>
-                {saving ? "Saving..." : success ? "Saved Successfully!" : "Save Profile Changes"}
-              </Button>
-            </div>
-          </div>
-        </form>
-
-        <div className="lg:col-span-4 space-y-6">
-          <div className="card-light p-6 space-y-4" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
-            <div className="flex items-center gap-2 border-b pb-3" style={{ borderColor: "var(--th-border)" }}>
-              <Shield size={18} className="text-[#3DDC84]" />
-              <h2 className="text-sm font-bold text-[var(--th-text-primary)]">License Status</h2>
-            </div>
-            <div className="space-y-3">
-              <div className="flex justify-between text-xs">
-                <span className="text-[var(--th-text-secondary)]">License Plan:</span>
-                <span className="font-bold text-[#0062FF]">{orgData.subscription}</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-[var(--th-text-secondary)]">License Seats:</span>
-                <span className="font-bold text-[var(--th-text-primary)]">{orgData.studentLimit} Seats</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-[var(--th-text-secondary)]">Status:</span>
-                {orgData.status === "ACTIVE" ? (
-                  <span className="font-bold text-emerald-500">Active</span>
-                ) : (
-                  <span className="font-bold text-yellow-500">Inactive</span>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+          <NotificationPrefsCard />
+          <PasswordCard />
+        </>
+      )}
     </div>
+  );
+}
+
+function NotificationPrefsCard() {
+  const [prefs, setPrefs] = useState<{ inApp: boolean; email: boolean }>({ inApp: true, email: true });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await notificationService.getPreferences();
+        const g = (((res as Record<string, unknown>)?.data as Record<string, unknown>)?.globalChannels ?? {}) as Record<string, unknown>;
+        setPrefs({ inApp: g.inApp !== false, email: g.email !== false });
+      } catch {
+        /* keep defaults */
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const save = async (next: { inApp: boolean; email: boolean }) => {
+    setPrefs(next);
+    setSaving(true);
+    try {
+      await notificationService.updatePreferences({ globalChannels: next });
+      toast.success("Notification preferences saved");
+    } catch (err) {
+      toast.error(toApiError(err).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border p-6 space-y-4" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
+      <p className="text-sm font-semibold flex items-center gap-2" style={{ color: "var(--th-text-primary)" }}>
+        <Bell size={15} /> Notifications
+      </p>
+      {loading ? (
+        <SkeletonBlock height="h-8" />
+      ) : (
+        <div className="space-y-2">
+          {([
+            ["inApp", "In-app notifications", "Alerts inside the portal"],
+            ["email", "Email notifications", "Approvals, campaign updates and reminders"],
+          ] as const).map(([k, label, desc]) => (
+            <label key={k} className="flex items-center justify-between gap-4 rounded-lg border p-3" style={{ borderColor: "var(--th-border)" }}>
+              <span>
+                <span className="text-xs font-medium block" style={{ color: "var(--th-text-primary)" }}>{label}</span>
+                <span className="text-[11px]" style={{ color: "var(--th-text-faint)" }}>{desc}</span>
+              </span>
+              <input type="checkbox" checked={prefs[k]} disabled={saving}
+                onChange={(e) => save({ ...prefs, [k]: e.target.checked })} />
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PasswordCard() {
+  const [form, setForm] = useState({ currentPassword: "", newPassword: "", confirm: "" });
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (form.newPassword.length < 8) return toast.error("New password must be at least 8 characters");
+    if (form.newPassword !== form.confirm) return toast.error("Passwords do not match");
+    setSaving(true);
+    try {
+      await authService.changePassword(form.currentPassword, form.newPassword);
+      toast.success("Password updated. Other devices signed out.");
+      setForm({ currentPassword: "", newPassword: "", confirm: "" });
+    } catch (err) {
+      toast.error(toApiError(err).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="rounded-2xl border p-6 space-y-4" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
+      <p className="text-sm font-semibold flex items-center gap-2" style={{ color: "var(--th-text-primary)" }}>
+        <KeyRound size={15} /> Change password
+      </p>
+      <div className="grid sm:grid-cols-3 gap-4">
+        {([
+          ["currentPassword", "Current password"],
+          ["newPassword", "New password"],
+          ["confirm", "Confirm new password"],
+        ] as const).map(([k, label]) => (
+          <div key={k} className="space-y-1.5">
+            <label className="text-[10px] uppercase font-bold" style={{ color: "var(--th-text-faint)" }}>{label}</label>
+            <input type="password" value={form[k]} autoComplete={k === "currentPassword" ? "current-password" : "new-password"}
+              onChange={(e) => setForm((f) => ({ ...f, [k]: e.target.value }))}
+              className="w-full px-3 py-2 rounded-lg border text-xs"
+              style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }} />
+          </div>
+        ))}
+      </div>
+      <div className="flex justify-end">
+        <Button type="submit" loading={saving}>Update password</Button>
+      </div>
+    </form>
   );
 }

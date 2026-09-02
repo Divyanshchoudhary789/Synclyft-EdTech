@@ -5,7 +5,7 @@ const PlacementBatch = require('../models/PlacementBatchModel.js');
 const AuditLog = require('../models/AuditLogModel.js');
 const sendError = require('../utils/sendError.js');
 
-const { buildStudentReport, buildBatchReport, buildDashboardReport, buildOrganizationReport } = require('../services/performanceReportService.js');
+const { buildStudentReport, buildBatchReport, buildDashboardReport, buildOrganizationReport, studentReportToCsv, batchReportToCsv, organizationReportToCsv } = require('../services/performanceReportService.js');
 const { consumeEntitlement } = require('../middlewares/seatAccessMiddleware.js');
 
 const buildFilename = (prefix, format) => `${prefix}-${Date.now()}.${format}`;
@@ -171,6 +171,38 @@ const renderBatchPdf = (doc, report) => {
 
   writeSection(doc, 'Performance Trend');
   writeTableRows(doc, report.trendSeries || [], (point) => `${point.period} | Sessions: ${point.totalSessions} | Avg Score: ${point.averageScore} | Avg Risk: ${point.averageRisk}`);
+};
+
+const renderOrganizationPdf = (doc, report) => {
+  writeHeader(doc, 'Placement Cell Performance Report', `${report.organization?.name || 'Organization'} — generated ${new Date(report.generatedAt).toLocaleString()}`);
+
+  const m = report.metrics || {};
+  writeSection(doc, 'Summary Metrics');
+  writeKeyValue(doc, 'Active Students', m.activeStudents);
+  writeKeyValue(doc, 'Active Batches', m.activeBatches);
+  writeKeyValue(doc, 'Total Interview Sessions', m.totalSessions);
+  writeKeyValue(doc, 'Average Readiness Score', m.averageReadinessScore);
+  writeKeyValue(doc, 'Average Interview Score', m.averageInterviewScore);
+  writeKeyValue(doc, 'Average Risk Score', m.averageRiskScore);
+  writeKeyValue(doc, 'Students Needing Intervention', m.atRiskStudentsCount || 0);
+
+  writeSection(doc, 'Readiness Distribution');
+  writeKeyValue(doc, 'By Band', Object.entries(m.breakdownByReadinessBand || {}).map(([k, v]) => `${k}: ${v}`).join(' | ') || 'N/A');
+  writeKeyValue(doc, 'By Branch', Object.entries(m.breakdownByBranch || {}).map(([k, v]) => `${k}: ${v}`).join(' | ') || 'N/A');
+  writeKeyValue(doc, 'By Graduation Year', Object.entries(m.breakdownByGraduationYear || {}).map(([k, v]) => `${k}: ${v}`).join(' | ') || 'N/A');
+  writeKeyValue(doc, 'Grade Distribution', Object.entries(m.gradeBreakdown || {}).map(([k, v]) => `${k}: ${v}`).join(' | ') || 'N/A');
+
+  writeSection(doc, 'Batch Rollups');
+  writeTableRows(doc, report.batches || [], (b) => `${b.batchName} (${b.department || 'N/A'}, ${b.graduationYear || 'N/A'}) | Students: ${b.studentCount} | Avg Score: ${b.averageScore} | Band: ${b.readinessBand}`);
+
+  writeSection(doc, 'Top Students');
+  writeTableRows(doc, report.topStudents || [], (s) => `${s.name} | ${s.branch || 'N/A'} | Readiness: ${s.placementReadinessScore} | Avg Score: ${s.averageScore}`);
+
+  writeSection(doc, 'At-Risk Students');
+  writeTableRows(doc, report.atRiskStudents || [], (s) => `${s.name} | ${s.branch || 'N/A'} | Readiness: ${s.placementReadinessScore} | Avg Score: ${s.averageScore}`);
+
+  writeSection(doc, 'Performance Trend');
+  writeTableRows(doc, report.trendSeries || [], (p) => `${p.period} | Sessions: ${p.totalSessions} | Avg Score: ${p.averageScore} | Avg Risk: ${p.averageRisk}`);
 };
 
 const getStudentPerformanceReport = async (req, res) => {
@@ -368,6 +400,42 @@ const getOrganizationPerformanceDashboard = async (req, res) => {
     organizationName: requester.organization,
     query: req.query
   });
+
+  // File export (CSV / PDF) when ?format= is supplied.
+  if (req.query.format) {
+    const format = getDownloadFormat(req);
+
+    AuditLog.logAction({
+      user: req.user.id,
+      userEmail: requester.email || 'system',
+      userRole: requester.role || 'college-admin',
+      action: 'DATA_EXPORT',
+      resourceType: 'organization',
+      resourceId: req.user.id,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      endpoint: req.path,
+      method: req.method,
+      statusCode: 200,
+      details: { scope: 'organization', format }
+    }).catch(() => null);
+
+    if (format === 'csv') {
+      const fileName = buildFilename('placement-report', 'csv');
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      return res.status(200).send(organizationReportToCsv(report));
+    }
+
+    const fileName = buildFilename('placement-report', 'pdf');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    const doc = new PDFDocument({ margin: 40, size: 'A4' });
+    doc.pipe(res);
+    renderOrganizationPdf(doc, report);
+    doc.end();
+    return;
+  }
 
   return res.status(200).json({
     success: true,

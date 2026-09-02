@@ -370,7 +370,7 @@ class BillingController {
   static async verifyPayment(req, res) {
     const { orderId, paymentId, signature } = req.body;
 
-    const isValidSignature = PaymentGatewayService.verifyPaymentSignature(
+    const isValidSignature = await PaymentGatewayService.verifyPaymentSignature(
       orderId,
       paymentId,
       signature

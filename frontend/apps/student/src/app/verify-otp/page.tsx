@@ -139,52 +139,27 @@ export default function VerifyOtpPage() {
       ? "/auth/signup/college-admin/verify-otp"
       : "/auth/signup/student/verify-otp";
 
-    const res = await api.post(endpoint, {
-      email,
-      otp: code,
-    });
+    await api.post(endpoint, { email, otp: code });
 
-    if (res.status === 200) {
-      let user = res.data.user || res.data;
-      if (!user || !user.email) {
-        user = {
-          name: email ? email.split("@")[0] : "User",
-          email: email || "",
-          role: accountType === "company" ? "officer" : "student",
-        };
-      }
-      
-      useAuthStore.getState().setUser(user);
-      
-      try {
-        const fetchedUser = await useAuthStore.getState().fetchUser(true);
-        if (fetchedUser) {
-          user = fetchedUser;
-        }
-      } catch (fetchErr) {
-        console.error("Failed to fetch full user profile on OTP verification:", fetchErr);
-      }
-      
-      const role = user?.role;
-      if (role === "super-admin" || role === "admin" || role === "officer" || accountType === "company") {
-        alert("Registration completed successfully! Your account is pending super admin approval. You will be redirected to the login page.");
-        router.push("/login?message=Registration request submitted. Pending super admin approval.");
-      } else {
-        router.push("/onboarding");
-      }
-    } else {
-      setErrorMsg(res.data.message);
-      setIsVerifying(false);
-      setShouldShake(true);
-      setTimeout(() => setShouldShake(false), 500);
+    if (accountType === "company") {
+      // College-admin signup: no session; awaits super-admin approval.
+      setIsSuccess(true);
+      router.replace("/login?message=" + encodeURIComponent("Registration submitted. Your account is pending Synclyft approval — we'll email you when it's active."));
+      return;
     }
-  } catch (error: any) {
-    console.log(error);
 
+    // Student signup: the verify response set our auth cookies. Load the user.
+    const user = await useAuthStore.getState().fetchUser(true);
+    setIsSuccess(true);
+    if (user && user.role && user.role !== "student") {
+      router.replace("/login?message=" + encodeURIComponent("This portal is for students."));
+    } else {
+      router.replace("/onboarding");
+    }
+  } catch (error) {
     setErrorMsg(
-      error?.response?.data?.message || "Invalid OTP"
+      (error as { response?: { data?: { message?: string } } })?.response?.data?.message ?? "Invalid or expired code"
     );
-
     setIsVerifying(false);
     setShouldShake(true);
     setTimeout(() => setShouldShake(false), 500);
@@ -205,13 +180,7 @@ export default function VerifyOtpPage() {
     if (!canResend || isResending) return;
 
     const email = sessionStorage.getItem("email");
-    const name = sessionStorage.getItem("signup_name");
-    const organization = sessionStorage.getItem("signup_organization");
-    const password = sessionStorage.getItem("signup_password");
-
-    const accountType = sessionStorage.getItem("account_type") || "student";
-
-    if (!email || !name || !organization || !password) {
+    if (!email) {
       setErrorMsg("Registration session expired. Please sign up again.");
       return;
     }
@@ -221,32 +190,16 @@ export default function VerifyOtpPage() {
     setSuccessMsg(null);
 
     try {
-      const endpoint = accountType === "company"
-        ? "/auth/signup/college-admin/send-otp"
-        : "/auth/signup/student/send-otp";
-
-      const res = await api.post(endpoint, {
-        email,
-        name,
-        organization,
-        password,
-      });
-
-      if (res.status === 200 || res.status === 201) {
-        setResendTimer(60);
-        setCanResend(false);
-        setOtp(new Array(6).fill(""));
-        if (inputRefs.current[0]) {
-          inputRefs.current[0].focus();
-        }
-        setSuccessMsg("Verification code resent to your registered email.");
-      } else {
-        setErrorMsg(res.data.message || "Failed to resend code.");
-      }
-    } catch (error: any) {
-      console.log(error);
+      await api.post("/auth/otp/resend", { email, type: "Signup" });
+      setResendTimer(60);
+      setCanResend(false);
+      setOtp(new Array(6).fill(""));
+      inputRefs.current[0]?.focus();
+      setSuccessMsg("Verification code resent to your email.");
+    } catch (error) {
       setErrorMsg(
-        error?.response?.data?.message || "Failed to resend code. Please try again."
+        (error as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+          "Failed to resend code. Please try again."
       );
     } finally {
       setIsResending(false);
@@ -312,7 +265,7 @@ export default function VerifyOtpPage() {
       <div className={cn("flex-1", "flex", "items-center", "justify-center", "relative", "z-10", "py-10")}>
         <motion.div
           variants={containerVariants}
-          initial="hidden"
+          initial={false}
           animate="show"
           className="w-full max-w-[420px] p-8 rounded-2xl border text-center shadow-2xl relative overflow-hidden"
           style={{

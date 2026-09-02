@@ -814,11 +814,54 @@ const batchReportToCsv = (report) => {
   return rows.join('\n');
 };
 
+const organizationReportToCsv = (report) => {
+  const m = report.metrics || {};
+  const rows = [];
+
+  rows.push('# Organization placement report');
+  rows.push(['field', 'value'].join(','));
+  [
+    ['organization', report.organization?.name],
+    ['generatedAt', report.generatedAt],
+    ['activeStudents', m.activeStudents],
+    ['activeBatches', m.activeBatches],
+    ['totalSessions', m.totalSessions],
+    ['averageReadinessScore', m.averageReadinessScore],
+    ['averageInterviewScore', m.averageInterviewScore],
+    ['averageRiskScore', m.averageRiskScore],
+    ['atRiskStudentsCount', m.atRiskStudentsCount],
+  ].forEach((r) => rows.push(r.map(csvEscape).join(',')));
+
+  rows.push('');
+  rows.push('# Batch rollups');
+  rows.push(['batchName', 'batchCode', 'department', 'graduationYear', 'studentCount', 'averageScore', 'averageRisk', 'completedSessions', 'readinessBand'].join(','));
+  (report.batches || []).forEach((b) => {
+    rows.push([b.batchName, b.batchCode, b.department, b.graduationYear, b.studentCount, b.averageScore, b.averageRisk, b.completedSessions, b.readinessBand].map(csvEscape).join(','));
+  });
+
+  rows.push('');
+  rows.push('# Top students');
+  rows.push(['name', 'email', 'branch', 'placementReadinessScore', 'averageScore', 'latestScore'].join(','));
+  (report.topStudents || []).forEach((s) => {
+    rows.push([s.name, s.email, s.branch, s.placementReadinessScore, s.averageScore, s.latestScore].map(csvEscape).join(','));
+  });
+
+  rows.push('');
+  rows.push('# At-risk students');
+  rows.push(['name', 'email', 'branch', 'placementReadinessScore', 'averageScore', 'latestScore'].join(','));
+  (report.atRiskStudents || []).forEach((s) => {
+    rows.push([s.name, s.email, s.branch, s.placementReadinessScore, s.averageScore, s.latestScore].map(csvEscape).join(','));
+  });
+
+  return rows.join('\n');
+};
+
 module.exports = {
   buildStudentReport,
   buildBatchReport,
   studentReportToCsv,
   batchReportToCsv,
+  organizationReportToCsv,
   buildDateRange,
   parseOptionalDate,
   normalizeGranularity,

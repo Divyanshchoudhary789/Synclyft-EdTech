@@ -6,13 +6,18 @@
   "exports": {
     ".": "./src/index.ts",
     "./api": "./src/api/api.ts",
+    "./api/services": "./src/api/services.ts",
+    "./api/hooks": "./src/api/hooks.ts",
+    "./api/models": "./src/api/models.ts",
     "./types": "./src/api/types.ts",
     "./store/auth": "./src/store/auth.ts",
     "./store/interview": "./src/store/interview.ts",
     "./theme": "./src/theme.tsx",
-    "./utils": "./src/utils.ts"
+    "./utils": "./src/utils.ts",
+    "./razorpay": "./src/razorpay.ts"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.101.0",
     "axios": "^1.18.1",
     "clsx": "^2.1.1",
     "tailwind-merge": "^3.6.0",

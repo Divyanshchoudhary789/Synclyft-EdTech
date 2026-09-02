@@ -1,6 +1,7 @@
 const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
 const User = require("../models/userModel.js");
+const { frontendUrls } = require("./env.js");
 
 let io;
 const userSocketMap = new Map();
@@ -8,16 +9,29 @@ const userSocketMap = new Map();
 const initSocket = (server) => {
     io = new Server(server, {
         cors: {
-            origin: process.env.FRONTEND_URL || "http://localhost:3000",
+            origin: frontendUrls.length ? frontendUrls : "http://localhost:3000",
             methods: ["GET", "POST", "PATCH", "PUT", "DELETE"],
             credentials: true
         }
     });
 
+    const parseCookie = (raw, name) => {
+        if (!raw) return null;
+        for (const part of raw.split(/;\s*/)) {
+            const eq = part.indexOf("=");
+            if (eq > -1 && part.slice(0, eq).trim() === name) {
+                return decodeURIComponent(part.slice(eq + 1));
+            }
+        }
+        return null;
+    };
+
     io.use(async (socket, next) => {
         try {
-            const token = socket.handshake.auth.token || socket.handshake.headers.cookie?.split("token=")[1]?.split(";")[0];
-            
+            const token =
+                socket.handshake.auth?.token ||
+                parseCookie(socket.handshake.headers.cookie, "token");
+
             if (!token) {
                 return next(new Error("Authentication error: Token missing."));
             }

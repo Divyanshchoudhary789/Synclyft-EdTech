@@ -250,6 +250,12 @@ const StudentProfileSchema = new Schema({
         default: '',
         trim: true
     },
+    bio: {
+        type: String,
+        default: '',
+        trim: true,
+        maxlength: 500
+    },
 }, { timestamps: true });
 
 

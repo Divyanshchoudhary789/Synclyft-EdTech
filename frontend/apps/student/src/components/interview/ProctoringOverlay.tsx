@@ -1,194 +1,178 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
-import { Camera, Eye, AlertTriangle, X } from "lucide-react";
-import { useInterviewStore } from "@synclyft/lib/store/interview";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Camera, Eye, AlertTriangle, X, ShieldAlert } from "lucide-react";
 import { useAudioProctor } from "@/components/hooks/useAudioProctor";
+import { useFaceProctor } from "@/components/hooks/useFaceProctor";
+import { ProctorSocket, type ProctorViolationType } from "@/lib/proctorSocket";
 
 interface ViolationToast {
   id: string;
   message: string;
-  severity: "low" | "medium" | "high";
 }
 
-export function ProctoringOverlay() {
-  const { proctoring, addViolation } = useInterviewStore();
+interface Props {
+  sessionId: string;
+  candidateId: string;
+  roundType: "aptitude" | "coding" | "technical" | "hr";
+  /** Called when the server disqualifies the session. */
+  onTerminate?: (reason: string) => void;
+}
+
+const HUMAN: Record<ProctorViolationType, string> = {
+  face_absence: "Your face is not visible",
+  multiple_faces: "More than one person detected",
+  gaze_deviation: "Looking away from the screen",
+  tab_switch: "You switched away from this tab",
+  window_minimize: "The interview window lost focus",
+  paste_attempt: "Pasting is disabled during the interview",
+  scripted_input: "Automated input detected",
+  multiple_voices: "Background voices detected",
+  mobile_detected: "A phone was detected",
+};
+
+export function ProctoringOverlay({ sessionId, candidateId, roundType, onTerminate }: Props) {
   const [toasts, setToasts] = useState<ViolationToast[]>([]);
-  
-  const handleVoiceFlagged = useCallback(() => {
-    // showToast is declared later, but we can't easily reference it here if it's a const. Let's rely on setToasts directly to avoid dependency on showToast inside useCallback, or we can just use showToast as long as it doesn't change
-    const id = Math.random().toString(36).slice(2);
-    setToasts((prev) => [...prev, { id, message: "Background noise/voice detected", severity: "medium" }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 6000);
-    addViolation("voice", "medium");
-  }, [addViolation]);
-
-  useAudioProctor(true, handleVoiceFlagged);
-  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [riskScore, setRiskScore] = useState(0);
+  const [cameraOn, setCameraOn] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const proctorRef = useRef<ProctorSocket | null>(null);
 
-  // Draggable positioning state
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
-  const dragStart = useRef({ x: 0, y: 0 });
-  const activePosition = useRef({ x: 0, y: 0 });
+  const toast = useCallback((message: string) => {
+    const id = Math.random().toString(36).slice(2);
+    setToasts((t) => [...t, { id, message }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6000);
+  }, []);
 
-  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0) return; // Only allow primary (left) button click
-    setIsDragging(true);
-    dragStart.current = {
-      x: e.clientX - activePosition.current.x,
-      y: e.clientY - activePosition.current.y
-    };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  };
+  const report = useCallback(
+    (type: ProctorViolationType, rawData?: Record<string, unknown>) => {
+      proctorRef.current?.report(type, roundType, rawData);
+      toast(HUMAN[type]);
+    },
+    [roundType, toast]
+  );
 
-  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!isDragging) return;
-    const newX = e.clientX - dragStart.current.x;
-    const newY = e.clientY - dragStart.current.y;
-    const nextPos = { x: newX, y: newY };
-    setPosition(nextPos);
-    activePosition.current = nextPos;
-  };
-
-  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    setIsDragging(false);
-    e.currentTarget.releasePointerCapture(e.pointerId);
-  };
-
+  // ── Socket ──
   useEffect(() => {
-    let isMounted = true;
-    let streamRef: MediaStream | null = null;
+    if (!sessionId || !candidateId) return;
+    const p = new ProctorSocket(sessionId, candidateId, {
+      onReady: (s) => setRiskScore(s),
+      onRiskUpdate: (s, msg) => {
+        setRiskScore(s);
+        if (msg) toast(msg);
+      },
+      onTerminate: (reason) => onTerminate?.(reason),
+    });
+    p.connect();
+    proctorRef.current = p;
+    return () => {
+      p.disconnect();
+      proctorRef.current = null;
+    };
+  }, [sessionId, candidateId, onTerminate, toast]);
 
-    // Request camera on mount
-    navigator.mediaDevices?.getUserMedia({ video: true })
-      .then((stream) => {
-        if (!isMounted) {
-          stream.getTracks().forEach((t) => t.stop());
+  // ── Camera ──
+  useEffect(() => {
+    let stream: MediaStream | null = null;
+    let mounted = true;
+    navigator.mediaDevices
+      ?.getUserMedia({ video: { width: 320, height: 240 } })
+      .then((s) => {
+        if (!mounted) {
+          s.getTracks().forEach((t) => t.stop());
           return;
         }
-        streamRef = stream;
-        setCameraStream(stream);
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
+        stream = s;
+        if (videoRef.current) videoRef.current.srcObject = s;
+        setCameraOn(true);
       })
-      .catch((error) => {
-        // Camera denied — show a placeholder
-        alert("something went wrong")
-        console.log(error)
+      .catch(() => {
+        setCameraOn(false);
+        report("face_absence", { reason: "camera_denied" });
       });
-
     return () => {
-      isMounted = false;
-      if (streamRef) {
-        streamRef.getTracks().forEach((t) => t.stop());
-      }
+      mounted = false;
+      stream?.getTracks().forEach((t) => t.stop());
     };
-  }, []);
+  }, [report]);
 
+  // ── Face + audio detectors ──
+  useFaceProctor(videoRef, cameraOn, report);
+  useAudioProctor(true, useCallback(() => report("multiple_voices"), [report]));
+
+  // ── DOM-level violations ──
   useEffect(() => {
-    if (videoRef.current && cameraStream) {
-      videoRef.current.srcObject = cameraStream;
-    }
-  }, [cameraStream]);
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") report("tab_switch");
+    };
+    const onBlur = () => report("window_minimize");
+    const onPaste = (e: ClipboardEvent) => {
+      // Allow paste inside the code editor only.
+      const el = e.target as HTMLElement;
+      if (el?.closest?.(".monaco-editor")) return;
+      report("paste_attempt");
+    };
+    const onContextMenu = (e: MouseEvent) => e.preventDefault();
 
-  const showToast = (message: string, severity: "low" | "medium" | "high") => {
-    const id = Math.random().toString(36).slice(2);
-    setToasts((prev) => [...prev, { id, message, severity }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 6000);
-  };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("blur", onBlur);
+    document.addEventListener("paste", onPaste);
+    document.addEventListener("contextmenu", onContextMenu);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("blur", onBlur);
+      document.removeEventListener("paste", onPaste);
+      document.removeEventListener("contextmenu", onContextMenu);
+    };
+  }, [report]);
 
-  const dismissToast = (id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  };
-
-  // Simulate a proctoring alert for demo
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      showToast("Multiple faces detected in frame", "medium");
-    }, 15000);
-    return () => clearTimeout(timeout);
-  }, []);
-
-  const statusColor = proctoring.violations.length === 0 ? "#3DDC84" : "#0062FF";
+  const ringColor = riskScore >= 60 ? "#FF5C5C" : riskScore >= 25 ? "#F59E0B" : "#3DDC84";
 
   return (
     <>
-      {/* Camera preview — corner anchored & draggable */}
+      {/* Camera preview */}
       <div
-        className="fixed bottom-4 right-4 z-40 w-32 h-24 rounded-[8px] overflow-hidden border select-none transition-[border-color] duration-200"
-        style={{
-          borderColor: statusColor + "40",
-          transform: `translate3d(${position.x}px, ${position.y}px, 0)`,
-          cursor: isDragging ? "grabbing" : "grab",
-          touchAction: "none",
-        }}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        title="Drag to reposition"
+        className="fixed bottom-4 right-4 z-40 h-24 w-32 overflow-hidden rounded-lg border"
+        style={{ borderColor: ringColor + "55" }}
         data-testid="proctoring-camera"
       >
-        {cameraStream ? (
-          <video
-            ref={videoRef}
-            autoPlay
-            muted
-            playsInline
-            className="w-full h-full object-cover scale-x-[-1]"
-          />
-        ) : (
-          <div className="w-full h-full bg-[#1B1F26] flex items-center justify-center">
+        <video ref={videoRef} autoPlay muted playsInline className="h-full w-full scale-x-[-1] object-cover" />
+        {!cameraOn && (
+          <div className="absolute inset-0 flex items-center justify-center bg-[#1B1F26]">
             <Camera size={20} className="text-[#4A5260]" />
           </div>
         )}
-
-        {/* Status ring indicator */}
-        <div className="absolute top-1.5 right-1.5">
-          <div
-            className="w-2 h-2 rounded-full"
-            style={{ backgroundColor: statusColor }}
-          />
-        </div>
-
-        {/* Label */}
-        <div className="absolute bottom-0 left-0 right-0 bg-[rgba(0,0,0,0.6)] px-1.5 py-0.5">
-          <span className="font-mono text-[0.6rem] text-[#9CA3AF] uppercase tracking-wider flex items-center gap-1">
-            <Eye size={8} />
-            Proctored
+        <div className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full" style={{ backgroundColor: ringColor }} />
+        <div className="absolute inset-x-0 bottom-0 bg-black/60 px-1.5 py-0.5">
+          <span className="flex items-center gap-1 font-mono text-[0.6rem] uppercase tracking-wider text-[#9CA3AF]">
+            <Eye size={8} /> {riskScore > 0 ? `Risk ${riskScore}` : "Proctored"}
           </span>
         </div>
       </div>
 
       {/* Violation toasts */}
-      <div className="fixed top-16 right-4 z-50 space-y-2 max-w-xs" data-testid="proctoring-toasts">
-        {toasts.map((toast) => (
+      <div className="fixed right-4 top-16 z-50 max-w-xs space-y-2" data-testid="proctoring-toasts">
+        {toasts.map((t) => (
           <div
-            key={toast.id}
-            className="flex items-start gap-2.5 p-3 rounded-[8px] border"
-            style={{
-              backgroundColor: "#3D1010",
-              borderColor: "rgba(255,92,92,0.25)",
-            }}
+            key={t.id}
+            className="flex items-start gap-2.5 rounded-lg border p-3"
+            style={{ backgroundColor: "#3D1010", borderColor: "rgba(255,92,92,0.25)" }}
             data-testid="violation-toast"
           >
-            <AlertTriangle size={14} className="text-[#FF5C5C] shrink-0 mt-0.5" />
-            <span className="text-[#FF5C5C] text-xs leading-relaxed flex-1">{toast.message}</span>
-            <button
-              onClick={() => dismissToast(toast.id)}
-              className="text-[#FF5C5C] opacity-60 hover:opacity-100 transition-opacity"
-            >
+            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-[#FF5C5C]" />
+            <span className="flex-1 text-xs leading-relaxed text-[#FF5C5C]">{t.message}</span>
+            <button onClick={() => setToasts((x) => x.filter((y) => y.id !== t.id))} className="text-[#FF5C5C] opacity-60 hover:opacity-100">
               <X size={12} />
             </button>
           </div>
         ))}
       </div>
+
+      {riskScore >= 75 && (
+        <div className="fixed left-1/2 top-4 z-50 flex -translate-x-1/2 items-center gap-2 rounded-lg border border-rose-500/30 bg-[#3D1010] px-4 py-2 text-xs text-[#FF5C5C]">
+          <ShieldAlert size={14} /> High proctoring risk — further violations will end the session.
+        </div>
+      )}
     </>
   );
 }
