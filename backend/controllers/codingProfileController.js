@@ -1,54 +1,82 @@
 const StudentProfile = require("../models/StudentProfileModel.js");
 const crypto = require("crypto");
+const logger = require("../services/loggerService.js");
 
 const githubProvider = require("../utils/providers/githubProvider.js");
 const codeforcesProvider = require("../utils/providers/codeforcesProvider.js");
 const leetcodeProvider = require("../utils/providers/leetcodeProvider.js");
 const hackerrankProvider = require("../utils/providers/hackerrankProvider.js");
+const { buildPlatformUpdate } = require("../utils/codingProfiles.js");
 
-const getProviderFetcher = (platform) => {
-    const map = {
-        github: githubProvider.fetchGitHubData,
-        codeforces: codeforcesProvider.fetchCodeforcesData,
-        leetcode: leetcodeProvider.fetchLeetCodeData,
-        hackerrank: hackerrankProvider.fetchHackerRankData
-    };
-    return map[platform.toLowerCase()];
+const PROVIDERS = {
+    github: githubProvider.fetchGitHubData,
+    codeforces: codeforcesProvider.fetchCodeforcesData,
+    leetcode: leetcodeProvider.fetchLeetCodeData,
+    hackerrank: hackerrankProvider.fetchHackerRankData,
 };
+
+// Where the student should paste the verification token, per platform.
+const TOKEN_LOCATION = {
+    github: "your GitHub profile Bio or Name field",
+    leetcode: "your LeetCode profile Summary (About) or Name field",
+    codeforces: "your Codeforces first-name / last-name field",
+    hackerrank: "your HackerRank profile Bio",
+};
+
+const getProviderFetcher = (platform) => PROVIDERS[String(platform || "").toLowerCase()];
 
 const initiateVerification = async (req, res) => {
     try {
         const { platform, username } = req.body;
         const userId = req.user.id;
+        const platformKey = String(platform).toLowerCase();
 
-        if (!getProviderFetcher(platform)) {
-            return res.status(400).json({ message: 'Invalid platform specified.' });
+        if (!getProviderFetcher(platformKey)) {
+            return res.status(400).json({ success: false, message: "That platform isn't supported yet." });
         }
 
-        const duplicateQuery = {};
-        duplicateQuery[`externalMetrics.${platform.toLowerCase()}.username`] = username;
-        duplicateQuery[`externalMetrics.${platform.toLowerCase()}.isVerified`] = true;
-
-        const existingProfile = await StudentProfile.findOne(duplicateQuery);
-        if (existingProfile && existingProfile.user.toString() !== userId) {
-            return res.status(400).json({ message: 'This profile username is already verified by another student!' });
+        // Fail fast if the username doesn't exist on the platform.
+        const remoteData = await getProviderFetcher(platformKey)(username.trim());
+        if (!remoteData) {
+            return res.status(404).json({
+                success: false,
+                code: "PLATFORM_USER_NOT_FOUND",
+                message: `We couldn't find "${username.trim()}" on ${platform}. Double-check the username.`,
+            });
         }
 
-        const token = `ED-${platform.toUpperCase().substring(0, 2)}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+        // Block claiming a username already verified by someone else.
+        const dup = await StudentProfile.findOne({
+            [`externalMetrics.${platformKey}.username`]: username.trim(),
+            [`externalMetrics.${platformKey}.isVerified`]: true,
+        }).select("user").lean();
+        if (dup && String(dup.user) !== String(userId)) {
+            return res.status(409).json({ success: false, code: "USERNAME_TAKEN", message: `That ${platform} account is already linked to another student.` });
+        }
 
-        const updateData = {};
-        updateData[`externalMetrics.${platform.toLowerCase()}.username`] = username;
-        updateData[`externalMetrics.${platform.toLowerCase()}.verificationToken`] = token;
-        updateData[`externalMetrics.${platform.toLowerCase()}.isVerified`] = false;
+        const token = `ED-${platformKey.substring(0, 2).toUpperCase()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
 
-        await StudentProfile.findOneAndUpdate({ user: userId }, { $set: updateData }, { upsert: true });
+        await StudentProfile.findOneAndUpdate(
+            { user: userId },
+            {
+                $set: {
+                    [`externalMetrics.${platformKey}.username`]: username.trim(),
+                    [`externalMetrics.${platformKey}.verificationToken`]: token,
+                    [`externalMetrics.${platformKey}.isVerified`]: false,
+                },
+            },
+            { upsert: true }
+        );
 
         return res.status(200).json({
-            message: `Token generated. Please paste '${token}' inside your profile bio/first name field on ${platform}.`,
-            token: token
+            success: true,
+            token,
+            location: TOKEN_LOCATION[platformKey] || "your public profile bio",
+            message: `Paste "${token}" into ${TOKEN_LOCATION[platformKey] || "your profile bio"}, then hit Verify.`,
         });
     } catch (error) {
-        return res.status(500).json({ message: error.message });
+        logger.error("initiateVerification failed", { platform: req.body?.platform, error: error.message });
+        return res.status(500).json({ success: false, message: "Couldn't start verification. Please try again." });
     }
 };
 
@@ -56,89 +84,69 @@ const verifyProfile = async (req, res) => {
     try {
         const { platform } = req.body;
         const userId = req.user.id;
+        const platformKey = String(platform).toLowerCase();
 
         const studentProfile = await StudentProfile.findOne({ user: userId });
-        const platformKey = platform.toLowerCase();
         const config = studentProfile?.externalMetrics?.[platformKey];
 
         if (!config || !config.username || !config.verificationToken) {
-            return res.status(400).json({ message: 'Please initiate verification first.' });
+            return res.status(400).json({ success: false, code: "NOT_INITIATED", message: "Generate a verification token first." });
         }
 
-        const fetcher = getProviderFetcher(platform);
-        const remoteData = await fetcher(config.username);
-
+        const remoteData = await getProviderFetcher(platformKey)(config.username);
         if (!remoteData) {
-            return res.status(404).json({ message: `Could not sync data from ${platform}. Check username.` });
+            return res.status(502).json({
+                success: false,
+                code: "PLATFORM_UNREACHABLE",
+                message: `Couldn't reach ${platform} right now. Wait a moment and try Verify again.`,
+            });
         }
 
-        const bioText = (remoteData.bio || '').toLowerCase();
-        const realNameText = (remoteData.realName || '').toLowerCase();
-        const targetToken = config.verificationToken.toLowerCase();
+        const haystack = `${remoteData.bio || ""} ${remoteData.realName || ""}`.toLowerCase();
+        const token = config.verificationToken.toLowerCase();
+        const tokenPresent = haystack.includes(token);
 
-        const isTokenPresent = bioText.includes(targetToken) || realNameText.includes(targetToken);
-
-        if (!isTokenPresent && process.env.NODE_ENV !== 'development') {
-            return res.status(400).json({ message: `Verification token ${config.verificationToken} not found in profile bio.` });
+        // In non-production we let people skip the bio step to speed up testing.
+        const bypass = process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
+        if (!tokenPresent && !bypass) {
+            return res.status(400).json({
+                success: false,
+                code: "TOKEN_NOT_FOUND",
+                message: `We couldn't find ${config.verificationToken} in ${TOKEN_LOCATION[platformKey] || "your profile"}. Add it (it can be anywhere in the text), save, and try again.`,
+            });
         }
 
-        if (platformKey === 'leetcode' && remoteData.socialLinks?.github) {
-            const currentGitUser = studentProfile.externalMetrics?.github?.username;
-            if (currentGitUser && !remoteData.socialLinks.github.toLowerCase().includes(currentGitUser.toLowerCase())) {
-                return res.status(400).json({ message: "Verification Failed. LeetCode profile's linked GitHub account does not match your system verified GitHub!" });
+        // LeetCode extra check: if the profile links a GitHub and the student has
+        // a verified GitHub, they must match.
+        if (platformKey === "leetcode" && remoteData.socialLinks?.github) {
+            const ghUser = studentProfile.externalMetrics?.github?.username;
+            if (ghUser && studentProfile.externalMetrics?.github?.isVerified &&
+                !remoteData.socialLinks.github.toLowerCase().includes(ghUser.toLowerCase())) {
+                return res.status(400).json({
+                    success: false,
+                    code: "GITHUB_MISMATCH",
+                    message: "The GitHub linked on your LeetCode profile doesn't match your verified GitHub account.",
+                });
             }
         }
 
-        const updateData = {};
-        updateData[`externalMetrics.${platformKey}.isVerified`] = true;
-        updateData[`externalMetrics.${platformKey}.lastSyncedAt`] = new Date();
+        const set = buildPlatformUpdate(platformKey, remoteData);
+        set[`externalMetrics.${platformKey}.isVerified`] = true;
 
-        if (platformKey === 'leetcode') {
-            updateData[`externalMetrics.leetcode.easySolved`] = remoteData.stats.easySolved;
-            updateData[`externalMetrics.leetcode.mediumSolved`] = remoteData.stats.mediumSolved;
-            updateData[`externalMetrics.leetcode.hardSolved`] = remoteData.stats.hardSolved;
-            updateData[`externalMetrics.leetcode.totalSolved`] = remoteData.stats.totalSolved;
-            updateData[`externalMetrics.leetcode.contestRating`] = remoteData.stats.contestRating;
-            updateData[`externalMetrics.leetcode.globalRanking`] = remoteData.stats.globalRanking;
-            updateData[`externalMetrics.leetcode.reputation`] = remoteData.stats.reputation;
-            updateData[`externalMetrics.leetcode.streak`] = remoteData.stats.streak;
-            updateData[`externalMetrics.leetcode.totalActiveDays`] = remoteData.stats.totalActiveDays;
-            updateData[`externalMetrics.leetcode.attendedContestsCount`] = remoteData.stats.attendedContestsCount;
-        } else if (platformKey === 'github') {
-            updateData[`externalMetrics.github.bio`] = remoteData.bio;
-            updateData[`externalMetrics.github.avatarUrl`] = remoteData.avatarUrl;
-            updateData[`externalMetrics.github.htmlUrl`] = remoteData.htmlUrl;
-            updateData[`externalMetrics.github.portfolioUrl`] = remoteData.portfolioUrl;
-            updateData[`externalMetrics.github.publicRepos`] = remoteData.stats.publicRepos;
-            updateData[`externalMetrics.github.starsEarned`] = remoteData.stats.starsEarned;
-            updateData[`externalMetrics.github.followers`] = remoteData.stats.followers;
-            updateData[`externalMetrics.github.following`] = remoteData.stats.following;
-        } else if (platformKey === 'codeforces') {
-            updateData[`externalMetrics.codeforces.rating`] = remoteData.stats.rating;
-            updateData[`externalMetrics.codeforces.rank`] = remoteData.stats.rank;
-            updateData[`externalMetrics.codeforces.maxRating`] = remoteData.stats.maxRating;
-            updateData[`externalMetrics.codeforces.maxRank`] = remoteData.stats.maxRank;
-            updateData[`externalMetrics.codeforces.avatarUrl`] = remoteData.avatarUrl;
-            updateData[`externalMetrics.codeforces.contribution`] = remoteData.stats.contribution;
-            updateData[`externalMetrics.codeforces.friendOfCount`] = remoteData.stats.friendOfCount;
-            updateData[`externalMetrics.codeforces.totalSolved`] = remoteData.stats.totalSolved;
-            updateData[`externalMetrics.codeforces.totalSubmissions`] = remoteData.stats.totalSubmissions;
-        } else if (platformKey === 'hackerrank') {
-            updateData[`externalMetrics.hackerrank.badgesCount`] = remoteData.stats.badgesCount;
-            updateData[`externalMetrics.hackerrank.followersCount`] = remoteData.stats.followersCount;
-            updateData[`externalMetrics.hackerrank.totalSubmissions`] = remoteData.stats.totalSubmissions;
-            updateData[`externalMetrics.hackerrank.badges`] = remoteData.stats.badges;
-            updateData[`externalMetrics.hackerrank.certificates`] = remoteData.stats.certificates;
-        }
-
-        const updated = await StudentProfile.findOneAndUpdate({ user: userId }, { $set: updateData }, { new: true });
+        const updated = await StudentProfile.findOneAndUpdate(
+            { user: userId },
+            { $set: set },
+            { new: true }
+        );
 
         return res.status(200).json({
-            message: `${platform} profile verified successfully! Data synced.`,
-            data: updated.externalMetrics[platformKey]
+            success: true,
+            message: `${platform} connected. Your stats are now feeding your readiness score.`,
+            data: updated.externalMetrics[platformKey],
         });
     } catch (error) {
-        return res.status(500).json({ message: error.message });
+        logger.error("verifyProfile failed", { platform: req.body?.platform, error: error.message, stack: error.stack });
+        return res.status(500).json({ success: false, message: "Verification failed unexpectedly. Please try again." });
     }
 };
 
@@ -146,71 +154,34 @@ const syncProfile = async (req, res) => {
     try {
         const { platform } = req.body;
         const userId = req.user.id;
-        const platformKey = platform.toLowerCase();
+        const platformKey = String(platform).toLowerCase();
 
         const studentProfile = await StudentProfile.findOne({ user: userId });
         const config = studentProfile?.externalMetrics?.[platformKey];
 
         if (!config || !config.isVerified) {
-            return res.status(400).json({ message: 'Profile must be verified before syncing.' });
+            return res.status(400).json({ success: false, code: "NOT_VERIFIED", message: `Connect your ${platform} account before syncing.` });
         }
 
-        const fetcher = getProviderFetcher(platform);
-        const remoteData = await fetcher(config.username);
-
+        const remoteData = await getProviderFetcher(platformKey)(config.username);
         if (!remoteData) {
-            return res.status(500).json({ message: 'Failed to fetch fresh data.' });
+            return res.status(502).json({ success: false, code: "PLATFORM_UNREACHABLE", message: `Couldn't reach ${platform}. Try again shortly.` });
         }
 
-        const updateData = {};
-        updateData[`externalMetrics.${platformKey}.lastSyncedAt`] = new Date();
-
-        if (platformKey === 'leetcode') {
-            updateData[`externalMetrics.leetcode.easySolved`] = remoteData.stats.easySolved;
-            updateData[`externalMetrics.leetcode.mediumSolved`] = remoteData.stats.mediumSolved;
-            updateData[`externalMetrics.leetcode.hardSolved`] = remoteData.stats.hardSolved;
-            updateData[`externalMetrics.leetcode.totalSolved`] = remoteData.stats.totalSolved;
-            updateData[`externalMetrics.leetcode.contestRating`] = remoteData.stats.contestRating;
-            updateData[`externalMetrics.leetcode.globalRanking`] = remoteData.stats.globalRanking;
-            updateData[`externalMetrics.leetcode.reputation`] = remoteData.stats.reputation;
-            updateData[`externalMetrics.leetcode.streak`] = remoteData.stats.streak;
-            updateData[`externalMetrics.leetcode.totalActiveDays`] = remoteData.stats.totalActiveDays;
-            updateData[`externalMetrics.leetcode.attendedContestsCount`] = remoteData.stats.attendedContestsCount;
-        } else if (platformKey === 'github') {
-            updateData[`externalMetrics.github.bio`] = remoteData.bio;
-            updateData[`externalMetrics.github.avatarUrl`] = remoteData.avatarUrl;
-            updateData[`externalMetrics.github.htmlUrl`] = remoteData.htmlUrl;
-            updateData[`externalMetrics.github.portfolioUrl`] = remoteData.portfolioUrl;
-            updateData[`externalMetrics.github.publicRepos`] = remoteData.stats.publicRepos;
-            updateData[`externalMetrics.github.starsEarned`] = remoteData.stats.starsEarned;
-            updateData[`externalMetrics.github.followers`] = remoteData.stats.followers;
-            updateData[`externalMetrics.github.following`] = remoteData.stats.following;
-        } else if (platformKey === 'codeforces') {
-            updateData[`externalMetrics.codeforces.rating`] = remoteData.stats.rating;
-            updateData[`externalMetrics.codeforces.rank`] = remoteData.stats.rank;
-            updateData[`externalMetrics.codeforces.maxRating`] = remoteData.stats.maxRating;
-            updateData[`externalMetrics.codeforces.maxRank`] = remoteData.stats.maxRank;
-            updateData[`externalMetrics.codeforces.avatarUrl`] = remoteData.avatarUrl;
-            updateData[`externalMetrics.codeforces.contribution`] = remoteData.stats.contribution;
-            updateData[`externalMetrics.codeforces.friendOfCount`] = remoteData.stats.friendOfCount;
-            updateData[`externalMetrics.codeforces.totalSolved`] = remoteData.stats.totalSolved;
-            updateData[`externalMetrics.codeforces.totalSubmissions`] = remoteData.stats.totalSubmissions;
-        } else if (platformKey === 'hackerrank') {
-            updateData[`externalMetrics.hackerrank.badgesCount`] = remoteData.stats.badgesCount;
-            updateData[`externalMetrics.hackerrank.followersCount`] = remoteData.stats.followersCount;
-            updateData[`externalMetrics.hackerrank.totalSubmissions`] = remoteData.stats.totalSubmissions;
-            updateData[`externalMetrics.hackerrank.badges`] = remoteData.stats.badges;
-            updateData[`externalMetrics.hackerrank.certificates`] = remoteData.stats.certificates;
-        }
-
-        const updated = await StudentProfile.findOneAndUpdate({ user: userId }, { $set: updateData }, { new: true });
+        const updated = await StudentProfile.findOneAndUpdate(
+            { user: userId },
+            { $set: buildPlatformUpdate(platformKey, remoteData) },
+            { new: true }
+        );
 
         return res.status(200).json({
-            message: 'Stats synced successfully!',
-            data: updated.externalMetrics[platformKey]
+            success: true,
+            message: `${platform} stats refreshed.`,
+            data: updated.externalMetrics[platformKey],
         });
     } catch (error) {
-        return res.status(500).json({ message: error.message });
+        logger.error("syncProfile failed", { platform: req.body?.platform, error: error.message });
+        return res.status(500).json({ success: false, message: "Sync failed. Please try again." });
     }
 };
 

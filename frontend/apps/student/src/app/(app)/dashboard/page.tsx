@@ -41,7 +41,7 @@ export default function DashboardPage() {
   const profile = dash?.profile ?? null;
   const ins = insights as {
     readinessScore?: number; lastInterviewScore?: number | null; totalInterviews?: number; activeStreak?: number;
-    nextScheduledMock?: { targetRole?: string; date?: string; isEstimated?: boolean } | null;
+    nextScheduledMock?: { targetRole?: string; date?: string; isEstimated?: boolean; resumable?: boolean } | null;
     chartData?: {
       radarData?: { labels: string[]; data: number[] };
       lineData?: { date: string; score: number }[];
@@ -79,8 +79,8 @@ export default function DashboardPage() {
 
   const recentSessions: HistoryRow[] = ((history as { analytics?: HistoryRow[] })?.analytics ?? dash?.recentSessions ?? []) as HistoryRow[];
   const skills = profile?.skills ?? [];
-  const codingProfiles = (profile as unknown as { codingProfiles?: Record<string, unknown> })?.codingProfiles ?? {};
-  const hasCodingProfiles = Object.keys(codingProfiles).length > 0;
+  const verifiedPlatforms = (dash as unknown as { verifiedPlatforms?: string[] })?.verifiedPlatforms ?? [];
+  const hasCodingProfiles = verifiedPlatforms.length > 0;
   const hasProfile = Boolean(profile?.branch);
   const firstRun = !isLoading && !isError && readiness === 0 && recentSessions.length === 0;
 
@@ -199,10 +199,15 @@ export default function DashboardPage() {
               ))}
             </div>
             {ins?.nextScheduledMock && (
-              <p className="mt-4 text-[11px] flex items-center gap-1.5" style={{ color: "var(--th-text-muted)" }}>
+              <Link href={ins.nextScheduledMock.resumable ? "/interview/setup" : "/campaigns"}
+                className="mt-4 text-[11px] flex items-center gap-1.5 hover:underline" style={{ color: "var(--th-text-muted)" }}>
                 <Play size={11} className="text-blue-500" />
-                {ins.nextScheduledMock.isEstimated ? "Suggested" : "Scheduled"} next: {ins.nextScheduledMock.targetRole || "mock interview"}
-              </p>
+                {ins.nextScheduledMock.resumable
+                  ? `Resume your ${ins.nextScheduledMock.targetRole || "mock"} interview →`
+                  : ins.nextScheduledMock.isEstimated
+                    ? `Suggested next: ${ins.nextScheduledMock.targetRole || "mock interview"}`
+                    : `Scheduled: ${ins.nextScheduledMock.targetRole || "mock interview"}`}
+              </Link>
             )}
           </div>
         )}

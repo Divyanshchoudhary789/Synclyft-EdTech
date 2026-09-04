@@ -5,6 +5,7 @@ import { Button } from "@synclyft/ui/components/Button";
 import { Badge } from "@synclyft/ui/components/Badge";
 import { ThemeToggle } from "@synclyft/ui/components/ThemeToggle";
 import { SkeletonBlock } from "@synclyft/ui/components/SkeletonBlock";
+import { Modal } from "@synclyft/ui/components/Modal";
 import { useTheme } from "@synclyft/lib/theme";
 import { useAuthStore } from "@synclyft/lib/store/auth";
 import { studentService, notificationService } from "@synclyft/lib/api/services";
@@ -14,7 +15,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import {
   Settings as SettingsIcon, User, Shield, Laptop, Check, GraduationCap, Link2,
-  Camera, RefreshCw, Copy, X, Sun, Moon, CheckCircle2, ExternalLink,
+  Camera, RefreshCw, Copy, Sun, Moon, CheckCircle2, ExternalLink,
 } from "lucide-react";
 
 type Tab = "profile" | "education" | "integrations" | "preferences" | "security";
@@ -25,6 +26,15 @@ const VERIFIABLE = [
   { id: "codeforces", label: "Codeforces" },
   { id: "hackerrank", label: "HackerRank" },
 ] as const;
+
+const STAT_LABEL: Record<string, string> = {
+  publicRepos: "Repos", starsEarned: "Stars", followers: "Followers", following: "Following",
+  totalSolved: "Solved", easySolved: "Easy", mediumSolved: "Medium", hardSolved: "Hard",
+  contestRating: "Rating", globalRanking: "Rank", streak: "Streak", totalActiveDays: "Active days",
+  attendedContestsCount: "Contests", rating: "Rating", maxRating: "Peak rating",
+  contribution: "Contribution", friendOfCount: "Friends", totalSubmissions: "Submissions",
+  badgesCount: "Badges", followersCount: "Followers",
+};
 
 export default function SettingsPage() {
   const { user, fetchUser } = useAuthStore();
@@ -325,9 +335,14 @@ export default function SettingsPage() {
                         {verified && (
                           <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[10px]" style={{ color: "var(--th-text-muted)" }}>
                             {Object.entries(m ?? {})
-                              .filter(([k, v]) => typeof v === "number" && v > 0 && !["verificationToken"].includes(k))
+                              .filter(([k, v]) => typeof v === "number" && v > 0 && (STAT_LABEL[k] !== undefined))
                               .slice(0, 4)
-                              .map(([k, v]) => <span key={k}>{k}: <strong style={{ color: "var(--th-text-secondary)" }}>{String(v)}</strong></span>)}
+                              .map(([k, v]) => <span key={k}>{STAT_LABEL[k]}: <strong style={{ color: "var(--th-text-secondary)" }}>{Number(v).toLocaleString()}</strong></span>)}
+                            {m?.lastSyncedAt ? (
+                              <span className="w-full text-[9px]" style={{ color: "var(--th-text-faint)" }}>
+                                Synced {new Date(String(m.lastSyncedAt)).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
+                              </span>
+                            ) : null}
                           </div>
                         )}
                       </div>
@@ -410,46 +425,51 @@ export default function SettingsPage() {
       </div>
 
       {/* Verification modal */}
-      {modal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="w-full max-w-md p-6 rounded-2xl border space-y-5 relative"
-            style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
-            <button type="button" onClick={() => setModal(null)} className="absolute right-4 top-4" style={{ color: "var(--th-text-faint)" }}><X size={18} /></button>
-            <h3 className="text-sm font-bold border-b pb-3 flex items-center gap-2" style={{ color: "var(--th-text-primary)", borderColor: "var(--th-border)" }}>
-              <Link2 size={14} /> Verify {modal.label}
-            </h3>
-            {!pToken ? (
-              <form onSubmit={initiate} className="space-y-4">
-                <p className="text-xs" style={{ color: "var(--th-text-secondary)" }}>Enter your {modal.label} username to generate a verification token.</p>
-                <input required value={pUsername} onChange={(e) => setPUsername(e.target.value)} placeholder={`${modal.label} username`}
-                  className="w-full px-3 py-2 rounded-lg border text-xs"
-                  style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }} />
-                <div className="flex justify-end gap-2">
-                  <Button type="button" variant="secondary" onClick={() => setModal(null)}>Cancel</Button>
-                  <Button type="submit" loading={pBusy}>Generate token</Button>
-                </div>
-              </form>
-            ) : (
-              <div className="space-y-4">
-                <p className="text-xs" style={{ color: "var(--th-text-secondary)" }}>
-                  Paste this token anywhere in your {modal.label} profile bio / name, then click verify.
-                </p>
-                <div className="flex items-center justify-between p-3 rounded-lg border" style={{ borderColor: "var(--th-border-strong)", backgroundColor: "var(--th-bg-secondary)" }}>
-                  <code className="text-xs font-mono select-all break-all pr-2" style={{ color: "var(--th-text-primary)" }}>{pToken}</code>
-                  <button type="button" onClick={() => { navigator.clipboard.writeText(pToken); toast.success("Copied"); }}
-                    className="flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold text-blue-500 border border-blue-500/20 shrink-0">
-                    <Copy size={12} /> Copy
-                  </button>
-                </div>
-                <div className="flex justify-end gap-2">
-                  <Button type="button" variant="secondary" onClick={() => setPToken(null)}>← Back</Button>
-                  <Button onClick={verify} loading={pBusy}>Verify</Button>
-                </div>
-              </div>
-            )}
+      <Modal
+        open={!!modal}
+        onClose={() => { setModal(null); setPToken(null); setPUsername(""); }}
+        size="sm"
+        icon={<div className="grid h-8 w-8 place-items-center rounded-lg" style={{ backgroundColor: "color-mix(in srgb, var(--th-primary) 12%, transparent)" }}><Link2 size={15} style={{ color: "var(--th-primary)" }} /></div>}
+        title={`Connect ${modal?.label ?? ""}`}
+        subtitle={pToken ? "Step 2 of 2 — verify the token" : "Step 1 of 2 — confirm your username"}
+        footer={
+          !pToken ? (
+            <>
+              <Button type="button" variant="secondary" onClick={() => setModal(null)}>Cancel</Button>
+              <Button type="button" loading={pBusy} onClick={() => initiate({ preventDefault() {} } as React.FormEvent)} disabled={!pUsername.trim()}>Generate token</Button>
+            </>
+          ) : (
+            <>
+              <Button type="button" variant="secondary" onClick={() => setPToken(null)}>Back</Button>
+              <Button type="button" onClick={verify} loading={pBusy}>Verify &amp; connect</Button>
+            </>
+          )
+        }
+      >
+        {!pToken ? (
+          <form onSubmit={initiate} className="space-y-3">
+            <p className="text-xs" style={{ color: "var(--th-text-secondary)" }}>
+              Enter your {modal?.label} username. We&apos;ll check it exists and give you a one-time token to prove the account is yours.
+            </p>
+            <input required value={pUsername} onChange={(e) => setPUsername(e.target.value)} placeholder={`${modal?.label ?? ""} username`}
+              className="w-full rounded-lg border px-3 py-2.5 text-sm"
+              style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }} />
+          </form>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-xs" style={{ color: "var(--th-text-secondary)" }}>
+              Paste this token anywhere in your <strong>{modal?.label}</strong> profile bio or name field, save it, then hit Verify. You can remove it afterwards.
+            </p>
+            <div className="flex items-center justify-between gap-2 rounded-lg border p-3" style={{ borderColor: "var(--th-border-strong)", backgroundColor: "var(--th-bg-secondary)" }}>
+              <code className="select-all break-all pr-2 font-mono text-xs" style={{ color: "var(--th-text-primary)" }}>{pToken}</code>
+              <button type="button" onClick={() => { navigator.clipboard?.writeText(pToken); toast.success("Copied"); }}
+                className="flex shrink-0 items-center gap-1 rounded border border-blue-500/20 px-2 py-1 text-xs font-semibold text-blue-500">
+                <Copy size={12} /> Copy
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </Modal>
     </div>
   );
 }

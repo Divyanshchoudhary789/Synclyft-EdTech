@@ -12,6 +12,7 @@ import { useAuthStore } from "@synclyft/lib/store/auth";
 import { openRazorpay } from "@synclyft/lib/razorpay";
 import { CreditCard, Download, FileText, AlertCircle, Check, X } from "lucide-react";
 import toast from "react-hot-toast";
+import { PageHeader } from "@/components/PageHeader";
 
 const STATUS: Record<string, "verdant" | "amber" | "coral" | "neutral"> = {
   completed: "verdant", paid: "verdant", pending: "amber", processing: "amber", failed: "coral", overdue: "coral",
@@ -120,17 +121,33 @@ export default function OfficerBillingPage() {
     }
   };
 
+  const [cancelling, setCancelling] = useState(false);
   const activeSub = sub && ["active", "grace_period"].includes(String(sub.status));
   const orderedPlans = plans ? PLAN_ORDER.filter((k) => plans[k]).map((k) => ({ key: k, ...plans[k] })) : [];
 
+  const cancelSubscription = async () => {
+    if (!sub?._id) return;
+    const reason = window.prompt("Cancel your subscription? Seats stay active until the end of the current billing period.\n\nOptional: tell us why (helps us improve):") ;
+    if (reason === null) return;
+    setCancelling(true);
+    try {
+      await subscriptionService.cancel({ subscriptionId: sub._id, reason: reason || undefined });
+      toast.success("Subscription cancelled. It stays active until the period ends.");
+      load();
+    } catch (err) {
+      toast.error(toApiError(err).message);
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   return (
-    <div className="p-6 md:p-8 max-w-5xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-lg font-semibold" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
-          Billing &amp; subscription
-        </h1>
-        <p className="text-xs" style={{ color: "var(--th-text-faint)" }}>Your institute&apos;s plan, seats and GST invoices</p>
-      </div>
+    <div className="p-5 sm:p-6 md:p-8 max-w-5xl mx-auto space-y-6">
+      <PageHeader
+        eyebrow="Account"
+        title="Billing & subscription"
+        subtitle="Your institute's plan, seats and GST invoices"
+      />
 
       {error && (
         <div className="flex items-center gap-2 rounded-xl border p-4 text-sm" style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-card-bg)", color: "var(--th-text-secondary)" }}>
@@ -147,10 +164,15 @@ export default function OfficerBillingPage() {
           </p>
           <p className="text-xs" style={{ color: "var(--th-text-faint)" }}>
             {activeSub
-              ? `Status: ${sub!.status}${sub!.endDate ? ` · renews ${new Date(sub!.endDate as string).toLocaleDateString("en-IN")}` : ""} · ${sub!.totalSeats ?? 0} seats`
-              : "Pick a plan below to unlock batches, campaigns and proctored interviews"}
+              ? `Status: ${sub!.status}${sub!.endDate ? ` · ${sub!.autoRenew ? "renews" : "ends"} ${new Date(sub!.endDate as string).toLocaleDateString("en-IN")}` : ""} · ${sub!.totalSeats ?? 0} seats`
+              : sub && String(sub.status) === "cancelled"
+                ? "Subscription cancelled. Re-subscribe below to keep proctored interviews running."
+                : "Pick a plan below to unlock batches, campaigns and proctored interviews"}
           </p>
         </div>
+        {activeSub && sub!.autoRenew !== false && (
+          <Button variant="secondary" loading={cancelling} onClick={cancelSubscription}>Cancel plan</Button>
+        )}
       </div>
 
       {/* Plan catalogue */}
@@ -216,8 +238,8 @@ export default function OfficerBillingPage() {
         ) : (
           <div className="divide-y" style={{ borderColor: "var(--th-border)" }}>
             {invoices.map((inv) => (
-              <div key={inv._id} className="px-6 py-4 flex items-center gap-4">
-                <div className="flex-1 min-w-0">
+              <div key={inv._id} className="px-4 sm:px-6 py-4 flex flex-wrap items-center gap-3 sm:gap-4">
+                <div className="flex-1 min-w-[140px]">
                   <p className="text-sm font-semibold truncate" style={{ color: "var(--th-text-primary)" }}>
                     {inv.invoiceNumber ?? `Invoice ${inv._id.slice(-6)}`}
                   </p>

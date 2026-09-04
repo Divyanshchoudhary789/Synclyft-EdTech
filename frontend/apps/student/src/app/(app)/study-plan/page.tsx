@@ -9,9 +9,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@synclyft/ui/components/Button";
 import { Badge } from "@synclyft/ui/components/Badge";
 import { SkeletonCard } from "@synclyft/ui/components/SkeletonBlock";
+import { Modal } from "@synclyft/ui/components/Modal";
 import toast from "react-hot-toast";
 import {
-  BookOpen, Sparkles, Clock, X, Target, Milestone, CheckCircle2, PlayCircle, PauseCircle, Archive, ChevronRight, AlertCircle,
+  BookOpen, Sparkles, Clock, Target, Milestone, CheckCircle2, PlayCircle, PauseCircle, Archive, ChevronRight, AlertCircle,
 } from "lucide-react";
 import { readPlanProgress } from "./progressStore";
 
@@ -133,20 +134,20 @@ export default function StudyPlanPage() {
         </div>
       )}
 
-      {genOpen && (
-        <GenerateModal
-          sessions={sessions}
-          onClose={() => setGenOpen(false)}
-          onDone={() => { setGenOpen(false); qc.invalidateQueries({ queryKey: ["insights", "study-plans"] }); }}
-        />
-      )}
+      <GenerateModal
+        open={genOpen}
+        sessions={sessions}
+        onClose={() => setGenOpen(false)}
+        onDone={() => { setGenOpen(false); qc.invalidateQueries({ queryKey: ["insights", "study-plans"] }); }}
+      />
     </div>
   );
 }
 
 function GenerateModal({
-  sessions, onClose, onDone,
+  open, sessions, onClose, onDone,
 }: {
+  open: boolean;
   sessions: { sessionId: string; overallScore?: number; finalGrade?: string; campaign?: { title?: string } | null; completedAt?: string }[];
   onClose: () => void;
   onDone: () => void;
@@ -178,17 +179,21 @@ function GenerateModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-lg rounded-2xl border flex flex-col max-h-[88vh]" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
-        <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b" style={{ borderColor: "var(--th-border)" }}>
-          <div>
-            <h3 className="text-sm font-bold" style={{ color: "var(--th-text-primary)" }}>Generate a study plan</h3>
-            <p className="text-[11px] mt-0.5" style={{ color: "var(--th-text-faint)" }}>Uses one AI evaluation credit · ~20 seconds</p>
-          </div>
-          <button onClick={onClose} style={{ color: "var(--th-text-faint)" }}><X size={18} /></button>
-        </div>
-
-        <div className="px-5 sm:px-6 py-5 space-y-4 overflow-y-auto">
+    <Modal
+      open={open}
+      onClose={onClose}
+      size="md"
+      icon={<div className="grid h-8 w-8 place-items-center rounded-lg" style={{ backgroundColor: "color-mix(in srgb, var(--th-primary) 12%, transparent)" }}><Sparkles size={15} style={{ color: "var(--th-primary)" }} /></div>}
+      title="Generate a study plan"
+      subtitle="Uses one AI evaluation credit · ~20 seconds"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button loading={busy} onClick={generate} icon={<Sparkles size={14} />} disabled={mode === "session" && sessions.length === 0}>Generate plan</Button>
+        </>
+      }
+    >
+        <div className="space-y-4">
           <div className="grid grid-cols-2 gap-2 rounded-lg border p-1" style={{ borderColor: "var(--th-border)" }}>
             {([["session", "From an interview"], ["role", "For a target role"]] as const).map(([k, label]) => (
               <button key={k} onClick={() => setMode(k)} disabled={k === "session" && sessions.length === 0}
@@ -233,12 +238,6 @@ function GenerateModal({
             </>
           )}
         </div>
-
-        <div className="flex justify-end gap-2 px-5 sm:px-6 py-4 border-t" style={{ borderColor: "var(--th-border)" }}>
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button loading={busy} onClick={generate} icon={<Sparkles size={14} />} disabled={mode === "session" && sessions.length === 0}>Generate</Button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

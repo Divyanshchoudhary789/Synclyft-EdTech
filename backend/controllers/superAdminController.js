@@ -143,7 +143,7 @@ const approveCollegeAdmin = async (req, res) => {
                 type: 'account_approved',
                 title: 'Account Approved',
                 message: `Your account has been approved by the Super Admin.`,
-                actionUrl: '/college-admin/dashboard',
+                actionUrl: '/dashboard',
                 actionText: 'Go to Dashboard',
                 priority: 'high',
                 channels: { inApp: true, email: true }
@@ -286,9 +286,19 @@ const getOrganizations = async (req, res) => {
         const query = {};
 
         if (req.query.status) query.status = req.query.status;
-        if (req.query.isVerified !== undefined) query.isVerified = req.query.isVerified === "true";
+        // Joi query validation coerces `isVerified` to a real boolean, but keep the
+        // string check too for callers that hit this endpoint without validation.
+        if (req.query.isVerified !== undefined && req.query.isVerified !== '') {
+            query.isVerified = req.query.isVerified === true || req.query.isVerified === "true";
+        }
         if (req.query.search) {
-            query.organizationName = { $regex: req.query.search, $options: "i" };
+            const rx = { $regex: String(req.query.search).trim(), $options: "i" };
+            query.$or = [
+                { organizationName: rx },
+                { registrationNumber: rx },
+                { "primaryContactPerson.email": rx },
+                { "primaryContactPerson.name": rx },
+            ];
         }
 
         const organizations = await Organization.find(query)

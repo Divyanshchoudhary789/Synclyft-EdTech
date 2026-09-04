@@ -13,11 +13,12 @@ import { SkeletonBlock } from "@synclyft/ui/components/SkeletonBlock";
 import toast from "react-hot-toast";
 import {
   ArrowLeft, Clock, Target, CheckCircle2, Circle, PlayCircle, PauseCircle, Archive, ChevronDown,
-  ExternalLink, Sparkles, AlertCircle, Flag, TrendingUp, PartyPopper,
+  ExternalLink, Sparkles, AlertCircle, Flag, TrendingUp, Trophy, ListChecks, CalendarRange,
 } from "lucide-react";
 import { readPlanProgress, togglePlanTopic } from "../progressStore";
 
 const PRIORITY: Record<string, "coral" | "amber" | "neutral"> = { high: "coral", medium: "amber", low: "neutral" };
+const OK = "#3DDC84";
 
 interface Topic {
   topicName: string;
@@ -43,24 +44,24 @@ interface Plan {
 
 const norm = (s: string) => s.trim().toLowerCase();
 
-// ── Competency arc ──────────────────────────────────────────────────────────
+/* ── Competency gauge — before → target on a half-ring ─────────────────────── */
 function CompetencyArc({ before, target }: { before: number; target: number }) {
-  const R = 52;
-  const CIRC = Math.PI * R; // half circle
-  const beforePct = Math.max(0, Math.min(100, before)) / 100;
-  const targetPct = Math.max(0, Math.min(100, target)) / 100;
+  const CIRC = Math.PI * 52;
+  const bp = Math.max(0, Math.min(100, before)) / 100;
+  const tp = Math.max(0, Math.min(100, target)) / 100;
   return (
-    <div className="relative w-[140px] h-[80px] shrink-0">
-      <svg viewBox="0 0 140 80" className="w-full h-full">
-        <path d="M 14 74 A 52 52 0 0 1 126 74" fill="none" stroke="var(--th-border)" strokeWidth="9" strokeLinecap="round" />
-        <path d="M 14 74 A 52 52 0 0 1 126 74" fill="none" stroke="var(--th-primary)" strokeWidth="9" strokeLinecap="round"
-          strokeDasharray={`${targetPct * CIRC} ${CIRC}`} opacity={0.35} />
-        <path d="M 14 74 A 52 52 0 0 1 126 74" fill="none" stroke="var(--th-primary)" strokeWidth="9" strokeLinecap="round"
-          strokeDasharray={`${beforePct * CIRC} ${CIRC}`} />
+    <div className="relative mx-auto w-[168px] h-[96px]">
+      <svg viewBox="0 0 168 96" className="w-full h-full">
+        <path d="M 16 88 A 60 60 0 0 1 152 88" fill="none" stroke="var(--th-border)" strokeWidth="10" strokeLinecap="round" />
+        <path d="M 16 88 A 60 60 0 0 1 152 88" fill="none" stroke="var(--th-primary)" strokeWidth="10" strokeLinecap="round"
+          strokeDasharray={`${tp * (CIRC * 60 / 52)} ${CIRC * 60 / 52}`} opacity={0.28} />
+        <path d="M 16 88 A 60 60 0 0 1 152 88" fill="none" stroke="var(--th-primary)" strokeWidth="10" strokeLinecap="round"
+          strokeDasharray={`${bp * (CIRC * 60 / 52)} ${CIRC * 60 / 52}`} className="transition-[stroke-dasharray] duration-700" />
       </svg>
-      <div className="absolute inset-x-0 bottom-0 text-center">
-        <span className="text-2xl font-bold" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>{Math.round(before)}</span>
-        <span className="text-xs" style={{ color: "var(--th-text-faint)" }}> → {Math.round(target)}</span>
+      <div className="absolute inset-x-0 bottom-1 text-center leading-none">
+        <span className="text-[1.75rem] font-bold" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>{Math.round(before)}</span>
+        <span className="text-sm ml-1" style={{ color: "var(--th-text-faint)" }}>→ {Math.round(target)}</span>
+        <p className="text-[10px] uppercase tracking-wider mt-1" style={{ color: "var(--th-text-faint)" }}>Readiness target</p>
       </div>
     </div>
   );
@@ -70,7 +71,7 @@ export default function StudyPlanTimelinePage() {
   const params = useParams<{ planId: string }>();
   const planId = params.planId;
   const qc = useQueryClient();
-  const { data, isLoading, error, refetch } = useStudyPlan(planId);
+  const { data, isLoading, error } = useStudyPlan(planId);
   const plan = data as Plan | undefined;
 
   const [done, setDone] = useState<number[]>([]);
@@ -85,8 +86,6 @@ export default function StudyPlanTimelinePage() {
     [plan]
   );
 
-  // Map every topic to a week (or "general"). A topic is claimed by the first
-  // milestone whose `topics` names it.
   const { weekBuckets, generalTopics } = useMemo(() => {
     const claimed = new Set<number>();
     const buckets = milestones.map((m) => {
@@ -108,16 +107,23 @@ export default function StudyPlanTimelinePage() {
   const donePct = totalTopics ? Math.round((done.length / totalTopics) * 100) : 0;
   const hoursLeft = topics.reduce((acc, t, i) => acc + (done.includes(i) ? 0 : (t.estimatedHours || 0)), 0);
 
+  // "Current week" = first week that isn't fully done.
+  const currentWeekIndex = useMemo(() => {
+    const i = weekBuckets.findIndex(({ items }) => items.length > 0 && items.some(({ index }) => !done.includes(index)));
+    return i === -1 ? weekBuckets.length - 1 : i;
+  }, [weekBuckets, done]);
+
+  useEffect(() => { if (expanded === 0 && currentWeekIndex > 0) setExpanded(currentWeekIndex); }, [currentWeekIndex]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const toggle = (i: number) => setDone(togglePlanTopic(planId, i));
 
   const setStatus = async (status: string) => {
     setBusy(true);
     try {
       await insightsService.setStudyPlanStatus(planId, status);
-      toast.success(`Marked ${status}`);
+      toast.success(`Plan marked ${status}`);
       qc.invalidateQueries({ queryKey: ["insights", "study-plan", planId] });
       qc.invalidateQueries({ queryKey: ["insights", "study-plans"] });
-      refetch();
     } catch (err) {
       toast.error(toApiError(err).message);
     } finally {
@@ -127,17 +133,17 @@ export default function StudyPlanTimelinePage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6 max-w-3xl">
+      <div className="mx-auto max-w-5xl space-y-6">
         <SkeletonBlock height="h-6" width="w-40" />
-        <SkeletonBlock height="h-32" width="w-full" />
-        <SkeletonBlock height="h-64" width="w-full" />
+        <SkeletonBlock height="h-40" width="w-full" />
+        <SkeletonBlock height="h-72" width="w-full" />
       </div>
     );
   }
   if (error || !plan) {
     return (
-      <div className="max-w-lg">
-        <Link href="/study-plan" className="text-xs flex items-center gap-1 mb-4" style={{ color: "var(--th-text-faint)" }}><ArrowLeft size={12} /> All plans</Link>
+      <div className="mx-auto max-w-lg">
+        <Link href="/study-plan" className="mb-4 flex items-center gap-1 text-xs" style={{ color: "var(--th-text-faint)" }}><ArrowLeft size={12} /> All plans</Link>
         <div className="rounded-2xl border p-8 text-center" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
           <AlertCircle size={22} className="mx-auto mb-2 text-amber-500" />
           <p className="text-sm" style={{ color: "var(--th-text-primary)" }}>{error ? toApiError(error).message : "Plan not found."}</p>
@@ -150,160 +156,197 @@ export default function StudyPlanTimelinePage() {
   const targetComp = milestones.length ? (milestones[milestones.length - 1].targetCompetency ?? 85) : 85;
 
   return (
-    <div className="max-w-3xl space-y-6 sm:space-y-7 pb-6">
-      <Link href="/study-plan" className="text-xs flex items-center gap-1" style={{ color: "var(--th-text-faint)" }}>
+    <div className="mx-auto max-w-5xl space-y-6 pb-28 lg:pb-6">
+      <Link href="/study-plan" className="flex items-center gap-1 text-xs" style={{ color: "var(--th-text-faint)" }}>
         <ArrowLeft size={12} /> All plans
       </Link>
 
-      {/* ── Hero ── */}
-      <div className="rounded-2xl border p-6" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
-        <div className="flex flex-col sm:flex-row sm:items-center gap-5">
-          <CompetencyArc before={before} target={targetComp} />
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2 mb-1">
-              <Badge variant={plan.status === "completed" ? "verdant" : "neutral"}>{plan.status}</Badge>
-              {plan.targetRole && <span className="text-[11px]" style={{ color: "var(--th-text-faint)" }}>{plan.targetRole}</span>}
+      <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+        {/* ── Main column ── */}
+        <div className="min-w-0 space-y-6">
+          {/* Title + narrative */}
+          <div>
+            <div className="mb-1.5 flex flex-wrap items-center gap-2">
+              <Badge variant={plan.status === "completed" ? "verdant" : plan.status === "archived" ? "neutral" : "amber"}>{plan.status}</Badge>
+              {plan.targetRole && <span className="text-xs" style={{ color: "var(--th-text-faint)" }}>{plan.targetRole}</span>}
             </div>
-            <h1 className="text-xl font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
+            <h1 className="text-[1.5rem] sm:text-[1.9rem] font-bold leading-tight tracking-tight"
+              style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
               {plan.planTitle}
             </h1>
-            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px]" style={{ color: "var(--th-text-muted)" }}>
-              <span className="flex items-center gap-1"><Target size={11} /> {done.length}/{totalTopics} topics done</span>
-              <span className="flex items-center gap-1"><Flag size={11} /> {milestones.length} weeks</span>
-              <span className="flex items-center gap-1"><Clock size={11} /> ~{Math.round(hoursLeft)}h left</span>
-              <span className="flex items-center gap-1"><TrendingUp size={11} /> readiness {Math.round(before)} → {Math.round(targetComp)}</span>
-            </div>
           </div>
-        </div>
 
-        <div className="mt-5">
-          <div className="flex items-center justify-between text-[11px] mb-1.5" style={{ color: "var(--th-text-faint)" }}>
-            <span>Progress</span><span>{donePct}%</span>
-          </div>
-          <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: "var(--th-bg-secondary)" }}>
-            <div className="h-full rounded-full transition-all" style={{ width: `${donePct}%`, backgroundColor: donePct >= 100 ? "#3DDC84" : "var(--th-primary)" }} />
-          </div>
-        </div>
-      </div>
-
-      {donePct >= 100 && plan.status !== "completed" && (
-        <div className="rounded-xl border p-4 flex items-center gap-3" style={{ borderColor: "#3DDC84", backgroundColor: "rgba(61,220,132,0.08)" }}>
-          <PartyPopper size={18} className="text-emerald-500 shrink-0" />
-          <p className="text-sm flex-1" style={{ color: "var(--th-text-primary)" }}>Every topic ticked off. Nice work.</p>
-          <Button size="sm" disabled={busy} onClick={() => setStatus("completed")}>Mark plan complete</Button>
-        </div>
-      )}
-
-      {plan.narrativeSummary && (
-        <div className="rounded-2xl border-l-2 p-4" style={{ borderColor: "var(--th-primary)", backgroundColor: "var(--th-card-bg)" }}>
-          <p className="text-xs font-bold uppercase tracking-wider mb-1.5 flex items-center gap-1.5" style={{ color: "var(--th-primary)" }}>
-            <Sparkles size={12} /> Why this plan
-          </p>
-          <p className="text-sm leading-relaxed" style={{ color: "var(--th-text-secondary)" }}>{plan.narrativeSummary}</p>
-        </div>
-      )}
-
-      {(plan.keyImprovementAreas ?? []).length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {plan.keyImprovementAreas!.map((a) => (
-            <span key={a} className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">{a}</span>
-          ))}
-        </div>
-      )}
-
-      {/* ── Timeline ── */}
-      <div>
-        <h2 className="text-xs font-bold uppercase tracking-wider mb-4" style={{ color: "var(--th-text-faint)" }}>Your weekly timeline</h2>
-        <div className="relative pl-11">
-          {/* spine */}
-          <div className="absolute left-[18px] top-2 bottom-2 w-0.5" style={{ backgroundColor: "var(--th-border)" }} />
-
-          {weekBuckets.map(({ milestone: m, items }, wi) => {
-            const weekDone = items.length ? items.filter(({ index }) => done.includes(index)).length : 0;
-            const complete = items.length > 0 && weekDone === items.length;
-            const isOpen = expanded === wi;
-            return (
-              <div key={wi} className="relative pb-6 last:pb-0">
-                {/* node */}
-                <div className="absolute -left-11 top-0 w-9 h-9 rounded-full flex items-center justify-center text-[11px] font-bold border-2"
-                  style={{
-                    borderColor: complete ? "#3DDC84" : "var(--th-primary)",
-                    backgroundColor: complete ? "#3DDC84" : "var(--th-bg)",
-                    color: complete ? "#0B0D10" : "var(--th-primary)",
-                  }}>
-                  {complete ? <CheckCircle2 size={16} /> : `W${m.week}`}
+          {plan.narrativeSummary && (
+            <div className="rounded-2xl border p-4 sm:p-5" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
+              <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider" style={{ color: "var(--th-primary)" }}>
+                <Sparkles size={12} /> Why this plan
+              </p>
+              <p className="text-sm leading-relaxed" style={{ color: "var(--th-text-secondary)" }}>{plan.narrativeSummary}</p>
+              {(plan.keyImprovementAreas ?? []).length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {plan.keyImprovementAreas!.map((a) => (
+                    <span key={a} className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-[10px] font-bold text-amber-600 dark:text-amber-400">{a}</span>
+                  ))}
                 </div>
+              )}
+            </div>
+          )}
 
-                <div className="rounded-2xl border overflow-hidden" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
-                  <button onClick={() => setExpanded(isOpen ? null : wi)} className="w-full text-left p-4 flex items-start gap-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold" style={{ color: "var(--th-text-primary)" }}>{m.title}</p>
-                      <div className="mt-1.5 flex items-center gap-2">
-                        <div className="h-1.5 flex-1 max-w-[140px] rounded-full overflow-hidden" style={{ backgroundColor: "var(--th-bg-secondary)" }}>
-                          <div className="h-full rounded-full" style={{ width: `${items.length ? (weekDone / items.length) * 100 : 0}%`, backgroundColor: complete ? "#3DDC84" : "var(--th-primary)" }} />
-                        </div>
-                        <span className="text-[10px]" style={{ color: "var(--th-text-faint)" }}>
-                          {weekDone}/{items.length} · target {m.targetCompetency ?? "—"}
-                        </span>
-                      </div>
+          {donePct >= 100 && plan.status !== "completed" && (
+            <div className="flex items-center gap-3 rounded-xl border p-4" style={{ borderColor: OK, backgroundColor: "rgba(61,220,132,0.08)" }}>
+              <Trophy size={18} className="shrink-0 text-emerald-500" />
+              <p className="flex-1 text-sm" style={{ color: "var(--th-text-primary)" }}>Every topic ticked off. Lock it in.</p>
+              <Button size="sm" disabled={busy} onClick={() => setStatus("completed")}>Mark complete</Button>
+            </div>
+          )}
+
+          {/* ── Timeline ── */}
+          <div>
+            <h2 className="mb-4 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider" style={{ color: "var(--th-text-faint)" }}>
+              <CalendarRange size={13} /> Weekly timeline
+            </h2>
+            <div className="relative pl-12">
+              <div className="absolute left-[19px] top-3 bottom-3 w-0.5 rounded-full" style={{ backgroundColor: "var(--th-border)" }} />
+
+              {weekBuckets.map(({ milestone: m, items }, wi) => {
+                const weekDone = items.length ? items.filter(({ index }) => done.includes(index)).length : 0;
+                const complete = items.length > 0 && weekDone === items.length;
+                const isCurrent = wi === currentWeekIndex && !complete;
+                const isOpen = expanded === wi;
+                return (
+                  <div key={wi} className="relative pb-5 last:pb-0">
+                    <div
+                      className="absolute -left-12 top-0 grid h-10 w-10 place-items-center rounded-full border-2 text-[11px] font-bold transition-colors"
+                      style={{
+                        borderColor: complete ? OK : isCurrent ? "var(--th-primary)" : "var(--th-border-strong)",
+                        backgroundColor: complete ? OK : isCurrent ? "var(--th-primary)" : "var(--th-card-bg)",
+                        color: complete ? "#06240F" : isCurrent ? "#fff" : "var(--th-text-faint)",
+                        boxShadow: isCurrent ? "0 0 0 4px color-mix(in srgb, var(--th-primary) 18%, transparent)" : "none",
+                      }}
+                    >
+                      {complete ? <CheckCircle2 size={17} /> : `W${m.week}`}
                     </div>
-                    <ChevronDown size={15} className={`shrink-0 mt-0.5 transition-transform ${isOpen ? "rotate-180" : ""}`} style={{ color: "var(--th-text-faint)" }} />
-                  </button>
 
-                  {isOpen && (
-                    <div className="border-t divide-y" style={{ borderColor: "var(--th-border)" }}>
-                      {items.length === 0 && (
-                        <p className="p-4 text-xs" style={{ color: "var(--th-text-faint)" }}>Review and consolidate the previous weeks&apos; topics.</p>
+                    <div className="overflow-hidden rounded-2xl border transition-colors"
+                      style={{ borderColor: isCurrent ? "var(--th-primary)" : "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
+                      <button onClick={() => setExpanded(isOpen ? null : wi)} className="flex w-full items-start gap-3 p-4 text-left">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <p className="truncate text-sm font-semibold" style={{ color: "var(--th-text-primary)" }}>{m.title}</p>
+                            {isCurrent && <span className="rounded bg-[color:var(--th-primary)]/12 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider" style={{ color: "var(--th-primary)" }}>Now</span>}
+                          </div>
+                          <div className="mt-2 flex items-center gap-2">
+                            <div className="h-1.5 w-full max-w-[160px] overflow-hidden rounded-full" style={{ backgroundColor: "var(--th-bg-secondary)" }}>
+                              <div className="h-full rounded-full transition-all" style={{ width: `${items.length ? (weekDone / items.length) * 100 : 0}%`, backgroundColor: complete ? OK : "var(--th-primary)" }} />
+                            </div>
+                            <span className="shrink-0 text-[10px]" style={{ color: "var(--th-text-faint)" }}>
+                              {weekDone}/{items.length}{m.targetCompetency ? ` · aim ${m.targetCompetency}` : ""}
+                            </span>
+                          </div>
+                        </div>
+                        <ChevronDown size={15} className={`mt-0.5 shrink-0 transition-transform ${isOpen ? "rotate-180" : ""}`} style={{ color: "var(--th-text-faint)" }} />
+                      </button>
+
+                      {isOpen && (
+                        <div className="divide-y border-t" style={{ borderColor: "var(--th-border)" }}>
+                          {items.length === 0 && (
+                            <p className="p-4 text-xs" style={{ color: "var(--th-text-faint)" }}>Consolidate and review the earlier weeks&apos; topics.</p>
+                          )}
+                          {items.map(({ topic: t, index }) => (
+                            <TopicRow key={index} topic={t} checked={done.includes(index)} onToggle={() => toggle(index)} />
+                          ))}
+                        </div>
                       )}
-                      {items.map(({ topic: t, index }) => (
+                    </div>
+                  </div>
+                );
+              })}
+
+              {generalTopics.length > 0 && (
+                <div className="relative">
+                  <div className="absolute -left-12 top-0 grid h-10 w-10 place-items-center rounded-full border-2"
+                    style={{ borderColor: "var(--th-border-strong)", backgroundColor: "var(--th-card-bg)", color: "var(--th-text-faint)" }}>
+                    <Target size={16} />
+                  </div>
+                  <div className="overflow-hidden rounded-2xl border" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
+                    <div className="border-b p-4" style={{ borderColor: "var(--th-border)" }}>
+                      <p className="text-sm font-semibold" style={{ color: "var(--th-text-primary)" }}>Ongoing focus areas</p>
+                      <p className="mt-0.5 text-[10px]" style={{ color: "var(--th-text-faint)" }}>Work these in alongside the weekly plan</p>
+                    </div>
+                    <div className="divide-y" style={{ borderColor: "var(--th-border)" }}>
+                      {generalTopics.map(({ topic: t, index }) => (
                         <TopicRow key={index} topic={t} checked={done.includes(index)} onToggle={() => toggle(index)} />
                       ))}
                     </div>
-                  )}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              )}
+            </div>
+          </div>
+        </div>
 
-          {generalTopics.length > 0 && (
-            <div className="relative pb-0">
-              <div className="absolute -left-11 top-0 w-9 h-9 rounded-full flex items-center justify-center border-2"
-                style={{ borderColor: "var(--th-border-strong)", backgroundColor: "var(--th-bg)", color: "var(--th-text-faint)" }}>
-                <Target size={15} />
+        {/* ── Sidebar (desktop) / hero card (mobile) ── */}
+        <aside className="lg:sticky lg:top-6 lg:self-start">
+          <div className="space-y-4 rounded-2xl border p-5" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
+            <CompetencyArc before={before} target={targetComp} />
+
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { icon: ListChecks, label: "Topics done", value: `${done.length}/${totalTopics}` },
+                { icon: Flag, label: "Weeks", value: milestones.length },
+                { icon: Clock, label: "Hours left", value: `~${Math.round(hoursLeft)}` },
+                { icon: TrendingUp, label: "Progress", value: `${donePct}%` },
+              ].map((s) => (
+                <div key={s.label} className="rounded-xl p-2.5 text-center" style={{ backgroundColor: "var(--th-bg-secondary)" }}>
+                  <s.icon size={13} className="mx-auto mb-1" style={{ color: "var(--th-text-faint)" }} />
+                  <p className="text-sm font-bold" style={{ color: "var(--th-text-primary)" }}>{s.value}</p>
+                  <p className="text-[9px] uppercase tracking-wide" style={{ color: "var(--th-text-faint)" }}>{s.label}</p>
+                </div>
+              ))}
+            </div>
+
+            <div>
+              <div className="mb-1.5 flex items-center justify-between text-[11px]" style={{ color: "var(--th-text-faint)" }}>
+                <span>Overall progress</span><span>{donePct}%</span>
               </div>
-              <div className="rounded-2xl border overflow-hidden" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
-                <div className="p-4 border-b" style={{ borderColor: "var(--th-border)" }}>
-                  <p className="text-sm font-semibold" style={{ color: "var(--th-text-primary)" }}>Ongoing focus areas</p>
-                  <p className="text-[10px] mt-0.5" style={{ color: "var(--th-text-faint)" }}>Work these in alongside the weekly plan</p>
-                </div>
-                <div className="divide-y" style={{ borderColor: "var(--th-border)" }}>
-                  {generalTopics.map(({ topic: t, index }) => (
-                    <TopicRow key={index} topic={t} checked={done.includes(index)} onToggle={() => toggle(index)} />
-                  ))}
-                </div>
+              <div className="h-2 overflow-hidden rounded-full" style={{ backgroundColor: "var(--th-bg-secondary)" }}>
+                <div className="h-full rounded-full transition-all duration-500" style={{ width: `${donePct}%`, backgroundColor: donePct >= 100 ? OK : "var(--th-primary)" }} />
               </div>
             </div>
-          )}
-        </div>
+
+            {/* status actions — desktop */}
+            <div className="hidden flex-col gap-2 lg:flex">
+              {plan.status !== "active" && plan.status !== "completed" && (
+                <Button variant="secondary" size="sm" disabled={busy} onClick={() => setStatus("active")}><PlayCircle size={13} /> Resume plan</Button>
+              )}
+              {plan.status === "active" && (
+                <Button variant="secondary" size="sm" disabled={busy} onClick={() => setStatus("paused")}><PauseCircle size={13} /> Pause plan</Button>
+              )}
+              {plan.status !== "completed" && (
+                <Button size="sm" disabled={busy} onClick={() => setStatus("completed")}><CheckCircle2 size={13} /> Mark complete</Button>
+              )}
+              {plan.status !== "archived" && (
+                <Button variant="danger" size="sm" disabled={busy} onClick={() => setStatus("archived")}><Archive size={13} /> Archive</Button>
+              )}
+            </div>
+          </div>
+        </aside>
       </div>
 
-      {/* ── Sticky actions ── */}
-      <div className="sticky bottom-3 z-30 rounded-2xl border shadow-lg backdrop-blur"
+      {/* ── Sticky action bar (mobile only) ── */}
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t px-4 py-3 backdrop-blur lg:hidden"
         style={{ borderColor: "var(--th-border)", backgroundColor: "color-mix(in srgb, var(--th-card-bg) 92%, transparent)" }}>
-        <div className="px-3 sm:px-5 py-3 flex items-center gap-3 flex-wrap">
-          <span className="text-xs" style={{ color: "var(--th-text-muted)" }}>{done.length}/{totalTopics} topics · {donePct}%</span>
-          <div className="flex flex-wrap gap-2 ml-auto">
-            {plan.status !== "active" && plan.status !== "completed" && (
-              <Button variant="secondary" size="sm" disabled={busy} onClick={() => setStatus("active")}><PlayCircle size={13} /> Resume</Button>
-            )}
+        <div className="mx-auto flex max-w-5xl items-center gap-2">
+          <span className="text-xs" style={{ color: "var(--th-text-muted)" }}>{done.length}/{totalTopics} · {donePct}%</span>
+          <div className="ml-auto flex gap-2">
             {plan.status === "active" && (
               <Button variant="secondary" size="sm" disabled={busy} onClick={() => setStatus("paused")}><PauseCircle size={13} /> Pause</Button>
             )}
+            {plan.status !== "active" && plan.status !== "completed" && (
+              <Button variant="secondary" size="sm" disabled={busy} onClick={() => setStatus("active")}><PlayCircle size={13} /> Resume</Button>
+            )}
             {plan.status !== "completed" && (
               <Button size="sm" disabled={busy} onClick={() => setStatus("completed")}><CheckCircle2 size={13} /> Complete</Button>
-            )}
-            {plan.status !== "archived" && (
-              <Button variant="danger" size="sm" disabled={busy} onClick={() => setStatus("archived")}><Archive size={13} /> Archive</Button>
             )}
           </div>
         </div>
@@ -316,20 +359,20 @@ function TopicRow({ topic: t, checked, onToggle }: { topic: Topic; checked: bool
   const [open, setOpen] = useState(false);
   const hasDetail = (t.subtopics ?? []).length > 0 || (t.resources ?? []).length > 0;
   return (
-    <div className="p-4">
+    <div className="p-4 transition-colors" style={checked ? { backgroundColor: "color-mix(in srgb, #3DDC84 5%, transparent)" } : undefined}>
       <div className="flex items-start gap-3">
-        <button onClick={onToggle} className="mt-0.5 shrink-0" aria-label={checked ? "Mark not done" : "Mark done"}>
+        <button onClick={onToggle} className="mt-0.5 shrink-0 transition-transform active:scale-90" aria-label={checked ? "Mark not done" : "Mark done"}>
           {checked
-            ? <CheckCircle2 size={18} className="text-emerald-500" />
-            : <Circle size={18} style={{ color: "var(--th-text-faint)" }} />}
+            ? <CheckCircle2 size={19} className="text-emerald-500" />
+            : <Circle size={19} style={{ color: "var(--th-text-faint)" }} />}
         </button>
         <div className="min-w-0 flex-1">
-          <button onClick={() => hasDetail && setOpen(!open)} className="text-left w-full">
+          <button onClick={() => hasDetail && setOpen(!open)} className="w-full text-left">
             <div className="flex items-center justify-between gap-2">
-              <span className={`text-sm font-medium ${checked ? "line-through opacity-60" : ""}`} style={{ color: "var(--th-text-primary)" }}>
+              <span className={`text-sm font-medium ${checked ? "line-through opacity-55" : ""}`} style={{ color: "var(--th-text-primary)" }}>
                 {t.topicName}
               </span>
-              <span className="flex items-center gap-2 shrink-0 text-[11px]" style={{ color: "var(--th-text-faint)" }}>
+              <span className="flex shrink-0 items-center gap-2 text-[11px]" style={{ color: "var(--th-text-faint)" }}>
                 {t.estimatedHours ? `~${t.estimatedHours}h` : ""}
                 {t.priority && <Badge variant={PRIORITY[t.priority] ?? "neutral"}>{t.priority}</Badge>}
                 {hasDetail && <ChevronDown size={13} className={`transition-transform ${open ? "rotate-180" : ""}`} />}
@@ -337,11 +380,11 @@ function TopicRow({ topic: t, checked, onToggle }: { topic: Topic; checked: bool
             </div>
           </button>
           {open && (
-            <div className="mt-2 space-y-2">
+            <div className="mt-2.5 space-y-2">
               {(t.subtopics ?? []).length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
                   {t.subtopics!.map((s) => (
-                    <span key={s} className="px-2 py-0.5 rounded-md text-[10px]" style={{ backgroundColor: "var(--th-bg-secondary)", color: "var(--th-text-muted)" }}>{s}</span>
+                    <span key={s} className="rounded-md px-2 py-0.5 text-[10px]" style={{ backgroundColor: "var(--th-bg-secondary)", color: "var(--th-text-muted)" }}>{s}</span>
                   ))}
                 </div>
               )}
@@ -349,7 +392,7 @@ function TopicRow({ topic: t, checked, onToggle }: { topic: Topic; checked: bool
                 <div className="flex flex-col gap-1">
                   {t.resources!.map((r, j) => r.url ? (
                     <a key={j} href={r.url} target="_blank" rel="noreferrer"
-                      className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1">
+                      className="flex items-center gap-1 text-[11px] text-blue-600 hover:underline dark:text-blue-400">
                       {r.title || "Resource"} <ExternalLink size={9} />
                     </a>
                   ) : (

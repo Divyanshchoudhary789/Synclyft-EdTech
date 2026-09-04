@@ -9,10 +9,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@synclyft/ui/components/Button";
 import { Badge } from "@synclyft/ui/components/Badge";
 import { SkeletonCard } from "@synclyft/ui/components/SkeletonBlock";
+import { Modal } from "@synclyft/ui/components/Modal";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import toast from "react-hot-toast";
 import {
-  FileText, Calendar, Target, Trash2, Sparkles, X, Gauge, TrendingUp, CheckCircle2, AlertTriangle, Lightbulb, ChevronLeft, ChevronRight,
+  FileText, Calendar, Target, Trash2, Sparkles, Gauge, TrendingUp, CheckCircle2, AlertTriangle, Lightbulb, ChevronLeft, ChevronRight,
 } from "lucide-react";
 
 // ── types ─────────────────────────────────────────────────────────────────
@@ -186,7 +187,7 @@ function AnalysesTab() {
         </div>
       )}
 
-      {detail && <AnalysisDrawer analysis={detail} onClose={() => setDetail(null)} />}
+      <AnalysisModal analysis={detail} onClose={() => setDetail(null)} />
     </div>
   );
 }
@@ -214,33 +215,38 @@ function List({ title, items, icon: Icon }: { title: string; items?: string[]; i
   );
 }
 
-function AnalysisDrawer({ analysis: a, onClose }: { analysis: AnalysisDetail; onClose: () => void }) {
-  const s = a.atsScore ?? 0;
+function AnalysisModal({ analysis: a, onClose }: { analysis: AnalysisDetail | null; onClose: () => void }) {
+  const s = a?.atsScore ?? 0;
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative w-full max-w-xl h-full overflow-y-auto shadow-2xl" style={{ backgroundColor: "var(--th-bg)" }}>
-        <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-bg)" }}>
-          <h2 className="text-sm font-bold truncate" style={{ color: "var(--th-text-primary)" }}>{a.fileName || "Resume analysis"}</h2>
-          <button onClick={onClose} style={{ color: "var(--th-text-faint)" }}><X size={18} /></button>
-        </div>
-        <div className="p-6 space-y-6">
-          <div className="flex items-center gap-4 rounded-2xl border p-5" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
-            <div className="relative w-16 h-16 shrink-0">
-              <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
+    <Modal
+      open={!!a}
+      onClose={onClose}
+      size="lg"
+      icon={<div className="grid h-8 w-8 place-items-center rounded-lg" style={{ backgroundColor: "color-mix(in srgb, var(--th-primary) 12%, transparent)" }}><Gauge size={15} style={{ color: "var(--th-primary)" }} /></div>}
+      title={a?.fileName || "Resume analysis"}
+      subtitle={a ? `${a.targetRole ? `For ${a.targetRole}` : "General"}${a.hasJobDescription ? " · matched to a JD" : ""}` : ""}
+      hero={
+        a ? (
+          <div className="flex items-center gap-4 border-b px-5 py-4 sm:px-6" style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-bg-secondary)" }}>
+            <div className="relative h-16 w-16 shrink-0">
+              <svg viewBox="0 0 36 36" className="h-full w-full -rotate-90">
                 <circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--th-border)" strokeWidth="3" />
                 <circle cx="18" cy="18" r="15.5" fill="none" stroke={scoreColor(s)} strokeWidth="3" strokeLinecap="round" strokeDasharray={`${(s / 100) * 97.4} 97.4`} />
               </svg>
               <span className="absolute inset-0 flex items-center justify-center text-lg font-bold" style={{ color: scoreColor(s) }}>{s}</span>
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-semibold" style={{ color: "var(--th-text-primary)" }}>ATS readiness</p>
-              <p className="text-xs mt-0.5" style={{ color: "var(--th-text-muted)" }}>
-                {a.targetRole ? `For ${a.targetRole}` : "General"}{a.hasJobDescription ? " · matched to a JD" : ""}
+              <p className="text-sm font-semibold" style={{ color: "var(--th-text-primary)" }}>ATS readiness score</p>
+              <p className="mt-0.5 text-xs" style={{ color: "var(--th-text-muted)" }}>
+                {s >= 80 ? "Strong — minor polish only" : s >= 60 ? "Solid base, a few gaps to close" : s >= 40 ? "Needs work before you apply" : "Rework recommended"}
               </p>
             </div>
           </div>
-
+        ) : null
+      }
+    >
+      {a && (
+        <div className="space-y-6">
           {a.summarySuggestion && (
             <div>
               <h3 className="text-xs font-bold uppercase tracking-wider mb-1.5" style={{ color: "var(--th-text-faint)" }}>Summary rewrite</h3>
@@ -272,8 +278,8 @@ function AnalysisDrawer({ analysis: a, onClose }: { analysis: AnalysisDetail; on
           <List title="Certifications" items={a.certificationImprovements} icon={Lightbulb} />
           <List title="General tips" items={a.generalTips} icon={Lightbulb} />
         </div>
-      </div>
-    </div>
+      )}
+    </Modal>
   );
 }
 

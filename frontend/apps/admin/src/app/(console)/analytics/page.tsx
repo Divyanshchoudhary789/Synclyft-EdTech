@@ -9,6 +9,7 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell,
 } from "recharts";
 import { AlertCircle, Activity, ShieldAlert, GraduationCap, Award } from "lucide-react";
+import { PageHeader } from "@/components/PageHeader";
 
 interface Overview {
   interviewStats: { totalSessions: number; completedSessions: number; averageScore: number; averageRiskScore: number; disqualifiedCount: number };
@@ -30,9 +31,11 @@ interface Heatmap {
 }
 
 const VIOLATION_LABELS: Record<string, string> = {
-  tab_switch: "Tab switch", window_minimize: "Window minimise", paste_attempt: "Paste attempt",
-  face_not_visible: "Face not visible", multiple_faces: "Multiple faces", context_menu: "Right-click",
-  copy_attempt: "Copy attempt", audio_anomaly: "Audio anomaly",
+  tab_switch: "Tab switch", window_minimize: "Window minimise", window_blur: "Lost focus",
+  paste_attempt: "Paste attempt", copy_attempt: "Copy attempt", context_menu: "Right-click",
+  face_absence: "Face not visible", face_not_visible: "Face not visible", multiple_faces: "Multiple faces",
+  gaze_deviation: "Looking away", multiple_voices: "Multiple voices", audio_anomaly: "Audio anomaly",
+  phone_detected: "Phone detected", person_detected: "Another person", multiple_persons: "Multiple people",
 };
 
 export default function AdminAnalyticsPage() {
@@ -73,21 +76,22 @@ export default function AdminAnalyticsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <p className="label-caption" style={{ color: "var(--th-text-faint)" }}>Platform</p>
-          <h1 className="text-2xl font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>Analytics</h1>
-        </div>
-        <div className="inline-flex rounded-lg border p-0.5" style={{ borderColor: "var(--th-border)" }}>
-          {[7, 30, 90].map((d) => (
-            <button key={d} onClick={() => load(d)}
-              className="px-3 py-1 rounded text-xs font-semibold transition-colors"
-              style={{ backgroundColor: days === d ? "var(--th-primary)" : "transparent", color: days === d ? "#fff" : "var(--th-text-secondary)" }}>
-              {d}d
-            </button>
-          ))}
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Platform"
+        title="Analytics"
+        subtitle="Interview volume, scoring and proctoring integrity across every institution"
+        actions={
+          <div className="inline-flex rounded-lg border p-0.5" style={{ borderColor: "var(--th-border)" }}>
+            {[7, 30, 90].map((d) => (
+              <button key={d} onClick={() => load(d)}
+                className="rounded px-3 py-1 text-xs font-semibold transition-colors"
+                style={{ backgroundColor: days === d ? "var(--th-primary)" : "transparent", color: days === d ? "#fff" : "var(--th-text-secondary)" }}>
+                {d}d
+              </button>
+            ))}
+          </div>
+        }
+      />
 
       {error && (
         <div className="flex items-center gap-2 rounded-xl border p-4 text-sm" style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-card-bg)", color: "var(--th-text-secondary)" }}>
@@ -97,10 +101,10 @@ export default function AdminAnalyticsPage() {
       )}
 
       {loading ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} className="h-28" />)}</div>
+        <div className="grid gap-3 sm:gap-4 grid-cols-2 lg:grid-cols-4">{Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} className="h-28" />)}</div>
       ) : (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:gap-4 grid-cols-2 lg:grid-cols-4">
             {[
               { label: "Interview sessions", value: iv?.totalSessions ?? 0, icon: Activity, color: "#4D7CFF" },
               { label: "Completed", value: iv?.completedSessions ?? 0, icon: GraduationCap, color: "#3DDC84" },

@@ -10,7 +10,7 @@ import { toApiError } from "@synclyft/lib/api";
 import type { ResumeAnalysis } from "@synclyft/lib/api/models";
 import toast from "react-hot-toast";
 import {
-  Upload, FileText, Sparkles, CheckCircle2, XCircle, RefreshCw, X, ArrowRight, Lightbulb,
+  Upload, FileText, Sparkles, CheckCircle2, XCircle, RefreshCw, X, ArrowRight, Lightbulb, Check, AlertTriangle,
 } from "lucide-react";
 
 type View = "upload" | "form" | "scanning" | "results";
@@ -198,7 +198,7 @@ export default function ResumeAnalyzerPage() {
                   <ul className="space-y-2">
                     {analysis.strengths.map((s, i) => (
                       <li key={i} className="text-xs flex gap-2" style={{ color: "var(--th-text-secondary)" }}>
-                        <span className="text-emerald-500 mt-0.5">✓</span> {s}
+                        <Check size={13} className="mt-0.5 shrink-0 text-emerald-500" /> {s}
                       </li>
                     ))}
                   </ul>
@@ -210,7 +210,7 @@ export default function ResumeAnalyzerPage() {
                   <ul className="space-y-2">
                     {analysis.weaknesses.map((s, i) => (
                       <li key={i} className="text-xs flex gap-2" style={{ color: "var(--th-text-secondary)" }}>
-                        <span className="text-rose-500 mt-0.5">!</span> {s}
+                        <AlertTriangle size={12} className="mt-0.5 shrink-0 text-rose-500" /> {s}
                       </li>
                     ))}
                   </ul>

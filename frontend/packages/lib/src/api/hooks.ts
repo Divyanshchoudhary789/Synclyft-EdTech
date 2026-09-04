@@ -43,7 +43,9 @@ export const useStudentProfile = () =>
 export const useNotifications = (status?: string) =>
   useQuery({
     queryKey: qk.notifications(status),
-    queryFn: () => notificationService.list({ status, limit: 30 }),
+    queryFn: () => notificationService.list({ status, limit: 60 }),
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
   });
 
 export const useUnreadCount = () =>
@@ -62,6 +64,7 @@ export const useNotificationActions = () => {
     markRead: useMutation({ mutationFn: notificationService.markRead, onSuccess: invalidate }),
     markAllRead: useMutation({ mutationFn: notificationService.markAllRead, onSuccess: invalidate }),
     archive: useMutation({ mutationFn: notificationService.archive, onSuccess: invalidate }),
+    restore: useMutation({ mutationFn: notificationService.restore, onSuccess: invalidate }),
     remove: useMutation({ mutationFn: notificationService.remove, onSuccess: invalidate }),
   };
 };

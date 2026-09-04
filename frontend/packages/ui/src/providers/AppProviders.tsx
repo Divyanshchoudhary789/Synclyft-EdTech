@@ -65,10 +65,11 @@ export function AppProviders({
           toastOptions={{
             duration: 4000,
             style: {
-              background: "var(--color-ink-900, #12151A)",
-              color: "#E8EAF0",
-              border: "1px solid rgba(255,255,255,0.08)",
+              background: "var(--th-card-bg, #12151A)",
+              color: "var(--th-text-primary, #E8EAF0)",
+              border: "1px solid var(--th-card-border, rgba(255,255,255,0.08))",
               fontSize: "14px",
+              boxShadow: "var(--th-shadow-lg, 0 8px 32px rgba(0,0,0,0.4))",
             },
           }}
         />

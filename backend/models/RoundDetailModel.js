@@ -13,6 +13,9 @@ const QuestionEvaluationSchema = new Schema({
     sub_topic: { type: String, default: '' },
     options: [{ type: String, default: '' }],
     explanation: { type: String, default: '' },
+    // Aptitude only: the 1-indexed page this MCQ was served on, so the client
+    // question palette can restore any-order navigation after a refresh.
+    aptitudePage: { type: Number },
     codingMetadata: {
         language: String,
         testCasesPassed: { type: Number, default: 0 },
@@ -51,7 +54,10 @@ const RoundDetailSchema = new Schema({
     // External provider (aptitude / coding model) batch session id, kept so a
     // client refresh can resume the round without re-initialising the provider.
     providerSessionId: { type: String, default: '' },
-    aptitudeTopics: [{ type: String }]
+    aptitudeTopics: [{ type: String }],
+    // Aptitude only: total MCQs in the generated batch (from the provider's
+    // pagination), so the client can render the full question palette.
+    aptitudeTotalQuestions: { type: Number, default: 0 }
 }, { timestamps: true });
 
 // One round document per (session, roundType). Prevents duplicate-node crashes

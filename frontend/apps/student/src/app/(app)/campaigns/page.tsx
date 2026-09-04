@@ -1,13 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useStudentCampaigns } from "@synclyft/lib/api/hooks";
 import { Badge } from "@synclyft/ui/components/Badge";
 import { Button } from "@synclyft/ui/components/Button";
 import { SkeletonCard } from "@synclyft/ui/components/SkeletonBlock";
+import { Modal } from "@synclyft/ui/components/Modal";
 import {
-  Megaphone, Calendar, Clock, Building2, X, Brain, Code2, Cpu, Mic2, ChevronRight, AlertCircle, GraduationCap,
+  Megaphone, Calendar, Clock, Building2, Brain, Code2, Cpu, Mic2, ChevronRight, AlertCircle, GraduationCap,
 } from "lucide-react";
 
 interface Campaign {
@@ -54,11 +56,28 @@ function daysLeft(deadline?: string): { text: string; urgent: boolean } | null {
 }
 
 export default function CampaignsPage() {
+  return (
+    <Suspense fallback={null}>
+      <CampaignsView />
+    </Suspense>
+  );
+}
+
+function CampaignsView() {
   const { data, isLoading, isError, refetch } = useStudentCampaigns();
   const [active, setActive] = useState<Campaign | null>(null);
+  const searchParams = useSearchParams();
 
   const campaigns = ((data?.campaigns ?? []) as unknown as Campaign[]);
   const batch = (data?.batch ?? null) as { name?: string; department?: string; graduationYear?: number } | null;
+
+  // Deep link from a notification: /campaigns?c=<id> opens that campaign.
+  const focusId = searchParams.get("c");
+  useEffect(() => {
+    if (!focusId || active) return;
+    const match = campaigns.find((c) => c._id === focusId);
+    if (match) setActive(match);
+  }, [focusId, campaigns, active]);
 
   return (
     <div className="space-y-7">
@@ -137,26 +156,37 @@ export default function CampaignsPage() {
         </div>
       )}
 
-      {active && <CampaignDetail campaign={active} onClose={() => setActive(null)} />}
+      <CampaignDetail campaign={active} onClose={() => setActive(null)} />
     </div>
   );
 }
 
-function CampaignDetail({ campaign: c, onClose }: { campaign: Campaign; onClose: () => void }) {
-  const rounds = roundsFromConfig(c.config);
-  const dl = daysLeft(c.deadline);
-  const ctd = c.companyTemplateDetails;
+function CampaignDetail({ campaign: c, onClose }: { campaign: Campaign | null; onClose: () => void }) {
+  const rounds = roundsFromConfig(c?.config);
+  const dl = daysLeft(c?.deadline);
+  const ctd = c?.companyTemplateDetails;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative w-full max-w-xl h-full overflow-y-auto shadow-2xl" style={{ backgroundColor: "var(--th-bg)" }}>
-        <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-bg)" }}>
-          <h2 className="text-sm font-bold truncate" style={{ color: "var(--th-text-primary)" }}>{c.title}</h2>
-          <button onClick={onClose} style={{ color: "var(--th-text-faint)" }}><X size={18} /></button>
-        </div>
-
-        <div className="p-6 space-y-6">
+    <Modal
+      open={!!c}
+      onClose={onClose}
+      size="lg"
+      icon={<div className="grid h-8 w-8 place-items-center rounded-lg" style={{ backgroundColor: "color-mix(in srgb, var(--th-primary) 12%, transparent)" }}><Megaphone size={15} style={{ color: "var(--th-primary)" }} /></div>}
+      title={c?.title ?? ""}
+      subtitle={ctd?.companyName || c?.config?.companyTemplate || (c?.deadline ? `Closes ${new Date(c.deadline).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : "Placement drive")}
+      footer={
+        <>
+          <Link href="/study-plan" onClick={onClose}>
+            <Button variant="secondary" iconRight={<ChevronRight size={13} />}>Build a study plan</Button>
+          </Link>
+          <Link href="/interview/setup" onClick={onClose}>
+            <Button icon={<Clock size={13} />}>Practice these rounds</Button>
+          </Link>
+        </>
+      }
+    >
+      {c && (
+        <div className="space-y-6">
           <div className="flex flex-wrap items-center gap-2">
             {dl && <Badge variant={dl.urgent ? "coral" : "neutral"}>{dl.text}</Badge>}
             {c.deadline && (
@@ -245,17 +275,8 @@ function CampaignDetail({ campaign: c, onClose }: { campaign: Campaign; onClose:
               Your college runs the official assessment for this campaign. Use a self-serve mock now to prepare for the same round mix.
             </p>
           </div>
-
-          <div className="flex flex-wrap gap-2 pt-2 border-t" style={{ borderColor: "var(--th-border)" }}>
-            <Link href="/interview/setup" onClick={onClose}>
-              <Button icon={<Clock size={13} />}>Practice these rounds</Button>
-            </Link>
-            <Link href="/study-plan" onClick={onClose}>
-              <Button variant="secondary" iconRight={<ChevronRight size={13} />}>Build a study plan</Button>
-            </Link>
-          </div>
         </div>
-      </div>
-    </div>
+      )}
+    </Modal>
   );
 }

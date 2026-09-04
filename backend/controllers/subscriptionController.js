@@ -322,7 +322,7 @@ class SubscriptionController {
           type: 'subscription_expiring',
           title: 'Subscription Activated',
           message: `Your ${subscription.planType} plan subscription is now active.`,
-          actionUrl: `/subscriptions/details/${subscription._id}`,
+          actionUrl: '/dashboard/billing',
           actionText: 'View Subscription',
           priority: 'normal',
           metadata: { subscriptionId: subscription._id, paymentId }
@@ -351,7 +351,7 @@ class SubscriptionController {
           type: 'subscription_expiring',
           title: 'Subscription Activated',
           message: `Your ${subscription.planType} plan subscription is now active. You now have full access to all included features.`,
-          actionUrl: '/student/dashboard',
+          actionUrl: '/dashboard',
           actionText: 'Start Practicing',
           priority: 'normal',
           metadata: { subscriptionId: subscription._id, paymentId }
@@ -718,7 +718,7 @@ class SubscriptionController {
         type: 'subscription_expired',
         title: 'Subscription Cancelled',
         message: `Your subscription has been cancelled.${reason ? ' Reason: ' + reason : ''}`,
-        actionUrl: '/subscriptions',
+        actionUrl: (req.user.role === 'student' ? '/subscription' : '/dashboard/billing'),
         actionText: 'View Subscriptions',
         priority: 'high',
         metadata: { subscriptionId: subscription._id, reason }
@@ -1013,10 +1013,40 @@ class SubscriptionController {
     const totalPending = await Subscription.countDocuments({ status: 'pending' });
     const totalGracePeriod = await Subscription.countDocuments({ status: 'grace_period' });
     const totalSuspended = await Subscription.countDocuments({ status: 'suspended' });
+    const totalCancelled = await Subscription.countDocuments({ status: 'cancelled' });
     const totalExpired = await Subscription.countDocuments({
       status: { $in: ['grace_period', 'suspended'] },
       endDate: { $lt: new Date() }
     });
+
+    // Plan mix + seat totals for the currently-paying base (active + grace).
+    const planBreakdown = await Subscription.aggregate([
+      { $match: { status: { $in: ['active', 'grace_period'] } } },
+      {
+        $group: {
+          _id: '$planType',
+          count: { $sum: 1 },
+          seats: { $sum: '$totalSeats' },
+          usedSeats: { $sum: '$usedSeats' },
+        }
+      },
+      { $sort: { count: -1 } }
+    ]);
+
+    const cycleBreakdown = await Subscription.aggregate([
+      { $match: { status: { $in: ['active', 'grace_period'] } } },
+      { $group: { _id: '$billingCycle', count: { $sum: 1 } } }
+    ]);
+
+    // All-time booked revenue = sum of every non-pending subscription's amount.
+    const bookedAgg = await Subscription.aggregate([
+      { $match: { status: { $nin: ['pending'] } } },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]);
+
+    const autoRenewOn = await Subscription.countDocuments({ status: { $in: ['active', 'grace_period'] }, autoRenew: true });
+
+    const mrr = Math.round(mrrAgg[0]?.mrr || 0);
 
     return res.status(200).json({
       success: true,
@@ -1026,8 +1056,14 @@ class SubscriptionController {
         totalPending,
         totalGracePeriod,
         totalSuspended,
+        totalCancelled,
         totalExpired,
-        mrr: Math.round(mrrAgg[0]?.mrr || 0),
+        mrr,
+        arr: mrr * 12,
+        bookedRevenue: Math.round(bookedAgg[0]?.total || 0),
+        planBreakdown,
+        cycleBreakdown,
+        autoRenewOn,
         expiringIn30Days: await Subscription.countDocuments({
           status: 'active',
           endDate: {

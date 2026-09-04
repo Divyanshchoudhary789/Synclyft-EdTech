@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { ArrowRight, ArrowLeft, Building2, User, Eye, EyeOff, CheckCircle } from "lucide-react";
+import { ArrowRight, ArrowLeft, Building2, User, Eye, EyeOff, CheckCircle, Circle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Logo } from "@synclyft/ui/components/Logo";
 import { cn } from "@synclyft/lib/utils";
@@ -100,7 +100,7 @@ export default function RegisterPage() {
     } else if (!checks.special) {
       guidanceMessage = "Password must contain at least one special character";
     } else {
-      guidanceMessage = "Password meets all requirements! ✓";
+      guidanceMessage = "Password meets all requirements";
       guidanceType = "success";
     }
   }
@@ -216,7 +216,7 @@ export default function RegisterPage() {
                           color: "var(--th-text-primary)",
                         }}
                       >
-                        Create your account ✨
+                        Create your account
                       </h1>
                       <p className={cn('text-sm')} style={{ color: "var(--th-text-secondary)" }}>
                         Set up your Synclyft AI profile in minutes
@@ -398,7 +398,7 @@ export default function RegisterPage() {
                                   : "text-[#FF5C5C] bg-[#FF5C5C]/10 border-[#FF5C5C]/20"
                               )}
                             >
-                              <span>{guidanceType === "success" ? "✓" : "○"}</span>
+                              {guidanceType === "success" ? <CheckCircle size={12} className="shrink-0" /> : <Circle size={12} className="shrink-0" />}
                               <span>{guidanceMessage}</span>
                             </motion.p>
                           )}

@@ -2,75 +2,123 @@
 
 import { useEffect, useRef } from "react";
 
+/**
+ * Background-voice detector.
+ *
+ * The previous version flagged on *any* sound above a fixed dB threshold using
+ * frequency-domain data — so a fan, a keyboard, or the AI interviewer's own
+ * voice through the speakers tripped it within seconds. This version:
+ *
+ *  1. Calibrates the room's noise floor over the first few seconds.
+ *  2. Only reacts to sound that is BOTH loud in absolute terms AND far above
+ *     that calibrated floor (i.e. a distinct nearby speaker, not room tone).
+ *  3. Requires the loud sound to be *sustained* for ~2s continuously before it
+ *     counts — a single cough or chair creak is ignored.
+ *  4. Waits a long cooldown between flags so one noisy stretch is one event.
+ *
+ * It is intentionally conservative: a false negative is far cheaper than
+ * wrongly disqualifying an honest candidate.
+ */
 export const useAudioProctor = (active: boolean, onVoiceFlagged: () => void) => {
-  const lastFlaggedRef = useRef<number>(0);
+  const cbRef = useRef(onVoiceFlagged);
+  cbRef.current = onVoiceFlagged;
 
   useEffect(() => {
-    if (!active || typeof window === "undefined") return;
+    if (!active || typeof window === "undefined" || !navigator.mediaDevices?.getUserMedia) return;
 
     let audioContext: AudioContext | null = null;
     let stream: MediaStream | null = null;
-    let animationFrameId: number | null = null;
+    let rafId: number | null = null;
     let isMounted = true;
 
-    const initializeAudioRegistry = async () => {
+    const CALIBRATION_MS = 4000;
+    const SUSTAIN_MS = 2000;          // loud sound must persist this long
+    const COOLDOWN_MS = 30000;        // min gap between flags
+    const ABS_FLOOR = 0.06;           // ignore anything quieter than this (RMS 0..1)
+    const OVER_BASELINE = 3.5;        // must be this many× the calibrated floor
+
+    let calibrationEndsAt = 0;
+    let noiseSamples: number[] = [];
+    let baseline = ABS_FLOOR;
+    let loudSince = 0;
+    let lastFlaggedAt = 0;
+
+    const init = async () => {
       try {
-        const mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mediaStream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false },
+        });
         if (!isMounted) {
-          mediaStream.getTracks().forEach((track) => track.stop());
+          mediaStream.getTracks().forEach((t) => t.stop());
           return;
         }
         stream = mediaStream;
-        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-        audioContext = new AudioContextClass();
+        const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        audioContext = new Ctx();
 
         const source = audioContext.createMediaStreamSource(stream);
         const analyser = audioContext.createAnalyser();
-        analyser.fftSize = 256;
-
+        analyser.fftSize = 1024;
+        analyser.smoothingTimeConstant = 0.6;
         source.connect(analyser);
-        const bufferLength = analyser.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLength);
 
-        const monitorThresholdLoop = () => {
+        const buf = new Uint8Array(analyser.fftSize);
+        calibrationEndsAt = performance.now() + CALIBRATION_MS;
+
+        const loop = () => {
           if (!isMounted) return;
+          rafId = requestAnimationFrame(loop);
 
-          analyser.getByteFrequencyData(dataArray);
-
-          // Compute Root Mean Square (RMS) via high performance typed array
-          let totalSquares = 0;
-          for (let i = 0; i < bufferLength; i++) {
-            totalSquares += dataArray[i] * dataArray[i];
+          analyser.getByteTimeDomainData(buf);
+          // Time-domain RMS around the 128 midpoint, normalised to 0..1.
+          let sumSq = 0;
+          for (let i = 0; i < buf.length; i++) {
+            const v = (buf[i] - 128) / 128;
+            sumSq += v * v;
           }
-          const rms = Math.sqrt(totalSquares / bufferLength);
+          const rms = Math.sqrt(sumSq / buf.length);
+          const nowMs = performance.now();
 
-          // Convert to DB
-          const db = rms > 0 ? 20 * Math.log10(rms / 255) : -Infinity;
+          if (nowMs < calibrationEndsAt) {
+            noiseSamples.push(rms);
+            return;
+          }
+          if (noiseSamples.length) {
+            noiseSamples.sort((a, b) => a - b);
+            // Use the 75th percentile of the calibration window as the floor.
+            const p75 = noiseSamples[Math.floor(noiseSamples.length * 0.75)] || ABS_FLOOR;
+            baseline = Math.max(ABS_FLOOR, p75);
+            noiseSamples = [];
+          }
 
-          // Senior Check: Rate limit voice flags to once every 2.5 seconds (Debounce telemetry)
-          if (db > -28) {
-            const now = Date.now();
-            if (now - lastFlaggedRef.current > 2500) {
-              onVoiceFlagged();
-              lastFlaggedRef.current = now;
+          const isLoud = rms > ABS_FLOOR && rms > baseline * OVER_BASELINE;
+          if (isLoud) {
+            if (loudSince === 0) loudSince = nowMs;
+            if (
+              nowMs - loudSince >= SUSTAIN_MS &&
+              nowMs - lastFlaggedAt >= COOLDOWN_MS
+            ) {
+              lastFlaggedAt = nowMs;
+              loudSince = 0;
+              cbRef.current();
             }
+          } else {
+            loudSince = 0;
           }
-          animationFrameId = requestAnimationFrame(monitorThresholdLoop);
         };
-
-        monitorThresholdLoop();
-      } catch (err) {
-        console.error("Audio telemetry sub-thread execution crash:", err);
+        loop();
+      } catch {
+        /* mic unavailable — face + DOM checks still cover the essentials */
       }
     };
 
-    initializeAudioRegistry();
+    init();
 
     return () => {
       isMounted = false;
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
-      if (stream) stream.getTracks().forEach((track) => track.stop());
-      if (audioContext && audioContext.state !== "closed") audioContext.close();
+      if (rafId) cancelAnimationFrame(rafId);
+      stream?.getTracks().forEach((t) => t.stop());
+      if (audioContext && audioContext.state !== "closed") audioContext.close().catch(() => {});
     };
-  }, [active, onVoiceFlagged]);
+  }, [active]);
 };

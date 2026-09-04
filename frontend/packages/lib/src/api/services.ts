@@ -88,6 +88,7 @@ export const notificationService = {
   markRead: (id: string) => api.patch(`/notifications/${id}/read`, {}).then((r) => r.data),
   markAllRead: () => api.patch("/notifications/read-all", {}).then((r) => r.data),
   archive: (id: string) => api.patch(`/notifications/${id}/archive`, {}).then((r) => r.data),
+  restore: (id: string) => api.patch(`/notifications/${id}/restore`, {}).then((r) => r.data),
   remove: (id: string) => api.delete(`/notifications/${id}/delete`).then((r) => r.data),
   getPreferences: () => api.get("/notifications/preferences").then((r) => r.data),
   updatePreferences: (body: Record<string, unknown>) =>
@@ -286,28 +287,61 @@ export const interviewService = {
     api.post(`/interview/session/${sessionId}/submit-technical`, body).then((r) => r.data),
   initAptitudeBatch: (sessionId: string, topics: string[]) =>
     api
-      .post(`/interview/initialize/aptitude-batchSession/${sessionId}`, { topics })
-      .then((r) => r.data as { success: boolean; endsAt?: string; durationSeconds?: number; data?: unknown }),
+      // The aptitude micro-service runs a full generation pipeline (and can
+      // cold-start) — give it room before the client gives up.
+      .post(`/interview/initialize/aptitude-batchSession/${sessionId}`, { topics }, { timeout: 130000 })
+      .then((r) => r.data as { success: boolean; endsAt?: string; durationSeconds?: number; data?: unknown; topics?: string[] }),
   aptitudeQuestion: (sessionId: string, batchSessionId: string, page: number) =>
     api
-      .post(`/interview/aptitude-round-questions/${sessionId}?page=${page}`, { batchSessionId })
-      .then((r) => r.data as { success: boolean; question?: Record<string, unknown> }),
+      .post(`/interview/aptitude-round-questions/${sessionId}?page=${page}`, { batchSessionId }, { timeout: 130000 })
+      .then((r) => r.data as {
+        success: boolean;
+        question?: Record<string, unknown> | null;
+        exhausted?: boolean;
+        totalItems?: number | null;
+        totalPages?: number | null;
+      }),
   submitAptitude: (sessionId: string, questionId: string, studentAnswer: string) =>
     api
-      .post(`/interview/session/${sessionId}/submit-aptitude`, { questionId, studentAnswer })
+      .post(`/interview/session/${sessionId}/submit-aptitude`, { questionId, studentAnswer }, { timeout: 60000 })
       .then((r) => r.data as { success: boolean; isCorrect?: boolean; scoreEarned?: number; explanation?: string }),
+  aptitudeProgress: (sessionId: string) =>
+    api.get(`/interview/aptitude-round-progress/${sessionId}`).then((r) => r.data as {
+      success: boolean;
+      total: number;
+      topics: string[];
+      status: "pending" | "active" | "completed";
+      endsAt: number | null;
+      durationSeconds: number | null;
+      answered: { questionId: string; page: number | null; studentAnswer: string; isAttempted: boolean; topic: string }[];
+    }),
   codingQuestions: (sessionId: string, page = 1) =>
     api
-      .get(`/interview/coding-round-questions/${sessionId}?page=${page}`)
-      .then((r) => r.data as { success: boolean; endsAt?: string; durationSeconds?: number; question?: Record<string, unknown> }),
+      // fetches + parses the résumé PDF and calls an external generator
+      .get(`/interview/coding-round-questions/${sessionId}?page=${page}`, { timeout: 130000 })
+      .then((r) => r.data as {
+        success: boolean;
+        endsAt?: string;
+        durationSeconds?: number;
+        page?: number;
+        totalProblems?: number;
+        exhausted?: boolean;
+        question?: import("./types").CodingQuestion | null;
+      }),
   submitCoding: (sessionId: string, body: { questionId: string; code: string; language: string }) =>
-    api.post(`/interview/session/${sessionId}/submit-coding`, body).then((r) => r.data),
+    api.post(`/interview/session/${sessionId}/submit-coding`, body, { timeout: 130000 }).then((r) => r.data),
+  runCoding: (sessionId: string, body: { questionId: string; code: string; language: string }) =>
+    api
+      .post(`/interview/session/${sessionId}/run-coding`, body, { timeout: 130000 })
+      .then((r) => r.data as import("./types").CodingRunResult),
   initTechnical: (sessionId: string) =>
-    api.post(`/interview/session/${sessionId}/initialize-technical-persona`, {}).then((r) => r.data.data ?? r.data),
+    api.post(`/interview/session/${sessionId}/initialize-technical-persona`, {}, { timeout: 60000 }).then((r) => r.data.data ?? r.data),
   technicalQuestion: (sessionId: string) =>
-    api.get(`/interview/technical-round-questions/${sessionId}`).then((r) => r.data.data ?? r.data),
+    api
+      .get(`/interview/technical-round-questions/${sessionId}`, { timeout: 130000 })
+      .then((r) => (r.data.data ?? r.data) as { success: boolean; question?: import("./types").CodingQuestion | null }),
   submitTechnical: (sessionId: string, body: Record<string, unknown>) =>
-    api.post(`/interview/session/${sessionId}/submit-technical`, body).then((r) => r.data.data ?? r.data),
+    api.post(`/interview/session/${sessionId}/submit-technical`, body, { timeout: 130000 }).then((r) => r.data.data ?? r.data),
   initHr: (sessionId: string) =>
     api.post(`/interview/session/${sessionId}/initialize-hr`, {}).then((r) => r.data.data ?? r.data),
 };
@@ -342,7 +376,19 @@ export const collegeAdminService = {
   updateBatch: (id: string, body: Record<string, unknown>) =>
     api.patch(`/college-admin/batches/${id}`, body).then((r) => r.data),
   archiveBatch: (id: string) => api.patch(`/college-admin/batches/${id}/archive`, {}).then((r) => r.data),
+  unarchiveBatch: (id: string) => api.patch(`/college-admin/batches/${id}/unarchive`, {}).then((r) => r.data),
   deleteBatch: (id: string) => api.delete(`/college-admin/batches/${id}`).then((r) => r.data),
+  batchReadiness: (id: string) =>
+    api.get(`/college-admin/insights/batch-readiness/${id}`).then((r) => r.data.data ?? r.data),
+  batchReportDashboard: (id: string, params: Record<string, unknown> = {}) =>
+    api.get(`/college-admin/reports/batches/${id}/dashboard`, { params }).then((r) => r.data.data ?? r.data),
+  recalculateScores: (batchId?: string) =>
+    api.post("/college-admin/insights/recalculate-scores", batchId ? { batchId } : {}).then((r) => r.data),
+  missedAptitude: (params: Record<string, unknown> = {}) =>
+    api.get("/college-admin/insights/students-missed-aptitude", { params }).then((r) => {
+      const d = r.data.data ?? r.data;
+      return (Array.isArray(d) ? d : d.students ?? d.data ?? []) as Record<string, unknown>[];
+    }),
   addStudentsToBatch: (id: string, studentIds: string[]) =>
     api.post(`/college-admin/batches/${id}/students`, { studentIds }).then((r) => r.data),
   removeStudentsFromBatch: (id: string, studentIds: string[]) =>
@@ -360,8 +406,8 @@ export const collegeAdminService = {
     api.post("/college-admin/campaigns", body).then((r) => r.data),
   updateCampaign: (id: string, body: Record<string, unknown>) =>
     api.patch(`/college-admin/campaigns/${id}`, body).then((r) => r.data),
-  assignCampaignToBatches: (campaignId: string, batchIds: string[], deadline?: string) =>
-    api.post("/college-admin/campaigns/assign-to-batches", { campaignId, batchIds, deadline }).then((r) => r.data),
+  assignCampaignToBatches: (campaignId: string, batchIds: string[], notifyStudents = true) =>
+    api.post("/college-admin/campaigns/assign-to-batches", { campaignId, batchIds, notifyStudents }).then((r) => r.data),
   campaignResults: (id: string) =>
     api.get(`/college-admin/campaigns/${id}/results`).then((r) => r.data.data ?? r.data),
   campaignAssignments: (id: string) =>
@@ -373,6 +419,18 @@ export const collegeAdminService = {
   organization: () => api.get("/college-admin/organization/me").then((r) => r.data.data ?? r.data),
   updateOrganization: (body: Record<string, unknown>) =>
     api.put("/college-admin/update/organization/me", body).then((r) => r.data),
+  addVerificationDocument: (file: File, documentType: string) => {
+    const fd = new FormData();
+    fd.append("document", file);
+    fd.append("documentType", documentType);
+    return api
+      .post("/college-admin/organization/me/verification-documents", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      })
+      .then((r) => r.data);
+  },
+  studentReportDashboard: (id: string, params: Record<string, unknown> = {}) =>
+    api.get(`/college-admin/reports/students/${id}/dashboard`, { params }).then((r) => r.data.data ?? r.data),
   reportsDashboard: (params: Record<string, unknown> = {}) =>
     api.get("/college-admin/reports/dashboard", { params }).then((r) => r.data.data ?? r.data),
   universityInsights: (params: Record<string, unknown> = {}) =>
@@ -396,6 +454,36 @@ export const collegeAdminService = {
     }),
   sendBulkNotification: (body: Record<string, unknown>) =>
     api.post("/college-admin/notifications/send-bulk", body).then((r) => r.data),
+  // ── Batch comparison ──
+  compareBatches: (params: { batchIds?: string[]; graduationYears?: number[] }) =>
+    api.get("/college-admin/insights/compare-batches", {
+      params: {
+        batchIds: params.batchIds?.join(","),
+        graduationYears: params.graduationYears?.join(","),
+      },
+    }).then((r) => r.data.data ?? r.data),
+  aiComparativeReport: (params: { batchIds?: string[]; graduationYears?: number[] }) =>
+    api.get("/college-admin/insights/ai-comparative-report", {
+      params: {
+        batchIds: params.batchIds?.join(","),
+        graduationYears: params.graduationYears?.join(","),
+      },
+    }).then((r) => r.data.data ?? r.data),
+  // ── Proctoring risk (richer than analytics/dashboard) ──
+  proctorRiskDashboard: (days = 30) =>
+    api.get("/analytics/proctor/dashboard", { params: { days } }).then((r) => r.data.data ?? r.data),
+  // ── Interventions ──
+  createFollowUp: (body: Record<string, unknown>) =>
+    api.post("/college-admin/follow-ups", body).then((r) => r.data.data ?? r.data),
+  updateStudentIntelligence: (studentId: string, body: Record<string, unknown>) =>
+    api.put(`/college-admin/students/${studentId}/intelligence-profile`, body).then((r) => r.data.data ?? r.data),
+  assignCampaignToStudents: (campaignId: string, studentIds: string[], notifyStudents = true) =>
+    api.post(`/college-admin/campaigns/${campaignId}/assign-students`, { campaignId, studentIds, notifyStudents }).then((r) => r.data),
+  studentScoreHistory: (studentId: string, params: Record<string, unknown> = {}) =>
+    api.get(`/college-admin/students/${studentId}/score-history`, { params }).then((r) => {
+      const d = r.data.data ?? r.data;
+      return (Array.isArray(d) ? d : d.data ?? []) as Record<string, unknown>[];
+    }),
 };
 
 // ─── Super admin (admin app) ──────────────────────────────────────────────
@@ -409,12 +497,12 @@ const listFrom = (raw: unknown, ...keys: string[]): Record<string, unknown>[] =>
 };
 
 export const superAdminService = {
-  pendingApprovals: () =>
-    api.get("/super-admin/pending-approvals").then((r) => listFrom(r.data, "pendingAdmins", "pending", "admins", "colleges")),
+  pendingApprovals: (params: Record<string, unknown> = {}) =>
+    api.get("/super-admin/pending-approvals", { params }).then((r) => listFrom(r.data, "pendingCollegeAdmins", "pendingAdmins", "pending", "admins", "colleges")),
   approveCollege: (id: string) =>
     api.patch(`/super-admin/approve-college-admin/${id}`, {}).then((r) => r.data),
   rejectCollege: (id: string, reason?: string) =>
-    api.patch(`/super-admin/reject-college-admin/${id}`, {}, { params: reason ? { reason } : {} }).then((r) => r.data),
+    api.patch(`/super-admin/reject-college-admin/${id}`, reason ? { reason } : {}).then((r) => r.data),
   overview: () => api.get("/super-admin/overview").then((r) => r.data.data ?? r.data),
   analyticsOverview: (params: Record<string, unknown> = {}) =>
     api.get("/super-admin/analytics/overview", { params }).then((r) => r.data.data ?? r.data),
@@ -428,7 +516,14 @@ export const superAdminService = {
   interviewHeatmap: (params: Record<string, unknown> = {}) =>
     api.get("/super-admin/analytics/interview-heatmap", { params }).then((r) => r.data.data ?? r.data),
   organizations: (params: Record<string, unknown> = {}) =>
-    api.get("/super-admin/organizations", { params }).then((r) => listFrom(r.data, "organizations", "orgs")),
+    api.get("/super-admin/organizations", { params }).then((r) => ({
+      items: listFrom(r.data, "organizations", "orgs"),
+      total: r.data.pagination?.total ?? 0,
+      pages: r.data.pagination?.pages ?? 1,
+      page: r.data.pagination?.page ?? 1,
+    })),
+  updateOrganizationStatus: (id: string, body: Record<string, unknown>) =>
+    api.patch(`/super-admin/organizations/${id}/status`, body).then((r) => r.data),
   students: (params: Record<string, unknown> = {}) =>
     api.get("/super-admin/students", { params }).then((r) => ({
       items: listFrom(r.data, "students"),
@@ -439,12 +534,24 @@ export const superAdminService = {
   updateUserStatus: (userId: string, status: string) =>
     api.patch(`/super-admin/users/${userId}/status`, { status }).then((r) => r.data),
   auditLogs: (params: Record<string, unknown> = {}) =>
-    api.get("/super-admin/audit-logs", { params }).then((r) => listFrom(r.data, "auditLogs", "logs")),
+    api.get("/super-admin/audit-logs", { params }).then((r) => ({
+      items: listFrom(r.data, "auditLogs", "logs"),
+      total: r.data.pagination?.total ?? 0,
+      pages: r.data.pagination?.pages ?? 1,
+    })),
+  auditLog: (id: string) =>
+    api.get(`/super-admin/audit-logs/${id}`).then((r) => r.data.data ?? r.data),
   auditSummary: (params: Record<string, unknown> = {}) =>
     api.get("/super-admin/audit-logs/summary", { params }).then((r) => r.data.data ?? r.data),
   allSubscriptions: (params: Record<string, unknown> = {}) =>
-    api.get("/subscriptions/all", { params }).then((r) => listFrom(r.data, "subscriptions")),
+    api.get("/subscriptions/all", { params }).then((r) => ({
+      items: listFrom(r.data, "subscriptions"),
+      total: r.data.pagination?.total ?? 0,
+      pages: r.data.pagination?.pages ?? 1,
+    })),
   subscriptionStats: () => api.get("/subscriptions/stats").then((r) => r.data.data ?? r.data),
+  cancelSubscription: (subscriptionId: string, reason?: string) =>
+    api.put("/subscriptions/cancel", { subscriptionId, reason }).then((r) => r.data),
 };
 
 export type { InterviewSession };

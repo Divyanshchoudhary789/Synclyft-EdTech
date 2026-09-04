@@ -101,7 +101,7 @@ class NotificationService {
               type: 'subscription_expiring',
               message,
               description,
-              actionUrl: actionUrl || '/subscriptions',
+              actionUrl: actionUrl || '/subscription',
               actionText: actionText || 'View Subscription',
               priority
             });
@@ -110,7 +110,7 @@ class NotificationService {
               type: 'subscription_expired',
               message,
               description,
-              actionUrl: actionUrl || '/subscriptions',
+              actionUrl: actionUrl || '/subscription',
               actionText: actionText || 'Renew Subscription',
               priority: 'urgent'
             });
@@ -128,7 +128,7 @@ class NotificationService {
               type,
               message,
               description,
-              actionUrl: actionUrl || '/student/dashboard',
+              actionUrl: actionUrl || '/dashboard',
               actionText: actionText || 'View Dashboard',
               priority
             });
@@ -137,7 +137,7 @@ class NotificationService {
               type: 'interview_completed',
               message,
               description,
-              actionUrl: actionUrl || '/interview/results',
+              actionUrl: actionUrl || '/interview/report',
               actionText: actionText || 'View Result',
               priority
             });
@@ -146,7 +146,7 @@ class NotificationService {
               type: 'achievement_unlocked',
               message,
               description,
-              actionUrl: actionUrl || '/student/achievements',
+              actionUrl: actionUrl || '/progress',
               actionText: actionText || 'View Achievement',
               priority
             });
@@ -155,7 +155,7 @@ class NotificationService {
               type: 'interview_scheduled',
               message,
               description,
-              actionUrl: actionUrl || '/student/dashboard',
+              actionUrl: actionUrl || '/dashboard',
               actionText: actionText || 'View Interview',
               priority
             });
@@ -164,7 +164,7 @@ class NotificationService {
               type: 'result_available',
               message,
               description,
-              actionUrl: actionUrl || '/student/results',
+              actionUrl: actionUrl || '/progress',
               actionText: actionText || 'View Result',
               priority
             });

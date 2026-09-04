@@ -61,7 +61,18 @@ export function CountUp({
 
     frameRef.current = requestAnimationFrame(animate);
 
-    return () => cancelAnimationFrame(frameRef.current);
+    // Fallback: rAF is heavily throttled in unfocused / background tabs, which
+    // can leave the counter stuck at a partial value. Guarantee the final
+    // number lands regardless.
+    const settle = setTimeout(() => {
+      setValue(end);
+      onComplete?.();
+    }, duration + 250);
+
+    return () => {
+      cancelAnimationFrame(frameRef.current);
+      clearTimeout(settle);
+    };
   }, [end, duration, start, decimals, onComplete]);
 
   return (

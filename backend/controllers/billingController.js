@@ -9,6 +9,7 @@ const logger = require('../services/loggerService');
 const { ApiError } = require('../utils/errorHandler');
 const { isOwnerOf, resolveOwnerIds } = require('../utils/ownership');
 const PDFDocument = require('pdfkit');
+const { renderInvoicePdf } = require('../utils/invoicePdf');
 
 class BillingController {
   static async getInvoices(req, res) {
@@ -596,96 +597,61 @@ class BillingController {
       throw new ApiError(403, 'Unauthorized access to this invoice');
     }
 
-    let orgData = invoice.organization;
-    if (!orgData && invoice.subscription && invoice.subscription.organization) {
-      orgData = await User.findById(invoice.subscription.organization)
-        .select('name email organization role status')
-        .lean();
-      if (!orgData) {
-        const org = await Organization.findOne({ user: invoice.subscription.organization })
-          .select('organizationName primaryContactPerson billingContactPerson address')
-          .lean();
-        if (org) {
-          orgData = {
-            name: org.organizationName || 'N/A',
-            email: org.primaryContactPerson?.email || org.billingContactPerson?.email || 'N/A',
-            organization: org.organizationName || 'N/A',
-            role: 'college-admin',
-            status: 'active',
-            address: org.address
-          };
-        }
+    // ── Resolve the buying party. `effectiveOrgId` can be an Organization _id
+    // OR a User _id (the field is polymorphic across older + newer records),
+    // so try both shapes plus the owner user's linked organization.
+    const ORG_FIELDS = 'organizationName primaryContactPerson billingContactPerson address taxInformation phone user';
+    let orgDoc = null;
+    let ownerUser = null;
+    if (effectiveOrgId) {
+      orgDoc = await Organization.findById(effectiveOrgId).select(ORG_FIELDS).lean().catch(() => null);
+      if (!orgDoc) {
+        orgDoc = await Organization.findOne({ user: effectiveOrgId }).select(ORG_FIELDS).lean().catch(() => null);
+      }
+      ownerUser = await User.findById(orgDoc?.user || effectiveOrgId)
+        .select('name email organization role').lean().catch(() => null);
+      if (!orgDoc && ownerUser?.organization) {
+        orgDoc = await Organization.findById(ownerUser.organization).select(ORG_FIELDS).lean().catch(() => null);
       }
     }
 
-    let orgName = orgData?.organization || orgData?.name || 'N/A';
-    let orgEmail = orgData?.email || 'N/A';
+    // ── assemble the "Billed to" block: prefer the invoice's own billingAddress,
+    // fall back to the org's registered contact + address.
+    const ba = invoice.billingAddress || {};
+    const oa = orgDoc?.address || {};
+    const contact = orgDoc?.billingContactPerson?.email
+      ? orgDoc.billingContactPerson
+      : (orgDoc?.primaryContactPerson || {});
 
-    let orgAddress = invoice.billingAddress?.address || 'N/A';
-    let orgCity = invoice.billingAddress?.city || '';
-    let orgState = invoice.billingAddress?.state || '';
-    let orgZip = invoice.billingAddress?.zipCode || '';
-    let orgCountry = invoice.billingAddress?.country || '';
+    const clean = (v) => (v && String(v).trim() && String(v).trim() !== 'N/A' ? String(v).trim() : '');
+    const streetLine = clean(ba.address) || clean(oa.street);
+    const cityLine = [
+      clean(ba.city) || clean(oa.city),
+      clean(ba.state) || clean(oa.state),
+      clean(ba.zipCode) || clean(oa.zipCode),
+    ].filter(Boolean).join(', ');
+    const countryLine = clean(ba.country) || clean(oa.country);
 
-    if (orgAddress === 'N/A' && orgData) {
-      orgAddress = orgData?.organization || 'N/A';
-    }
+    const buyer = {
+      name: clean(ba.name) || orgDoc?.organizationName || clean(ownerUser?.name) || 'Customer',
+      email: clean(ba.email) || clean(contact.email) || clean(ownerUser?.email),
+      phone: clean(ba.phone) || clean(contact.phone) || clean(orgDoc?.phone),
+      addressLines: [streetLine, cityLine, countryLine].filter(Boolean),
+      gstin: orgDoc?.taxInformation?.gstin || orgDoc?.taxInformation?.gstNumber || clean(ba.gstin),
+      stateCode: orgDoc?.taxInformation?.stateCode || '',
+    };
 
-    if (!orgCity && orgData?.address?.city) {
-      orgCity = orgData.address.city;
-    }
-    if (!orgState && orgData?.address?.state) {
-      orgState = orgData.address.state;
-    }
-    if (!orgZip && orgData?.address?.zipCode) {
-      orgZip = orgData.address.zipCode;
-    }
-    if (!orgCountry && orgData?.address?.country) {
-      orgCountry = orgData.address.country;
-    }
-
-    const doc = new PDFDocument();
-    const filename = `invoice-${invoice.invoiceNumber}.pdf`;
-
+    const filename = `invoice-${invoice.invoiceNumber || invoice._id}.pdf`;
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
+    const doc = new PDFDocument({ size: 'A4', margin: 50, bufferPages: true });
     doc.pipe(res);
-
-    doc.fontSize(20).text('INVOICE', { align: 'center' });
-    doc.fontSize(10).text(`Invoice Number: ${invoice.invoiceNumber}`, { align: 'left' });
-    doc.text(`Invoice Date: ${invoice.invoiceDate.toLocaleDateString()}`);
-    doc.text(`Due Date: ${invoice.dueDate.toLocaleDateString()}`);
-
-    doc.moveDown();
-    doc.fontSize(12).text('Billing Details', { underline: true });
-    doc.fontSize(10)
-      .text(`Organization: ${orgName}`)
-      .text(`Email: ${orgEmail}`)
-      .text(`Address: ${orgAddress}`);
-
-    if (orgCity || orgState || orgZip || orgCountry) {
-      doc.fontSize(10)
-        .text(`${orgCity} ${orgState} ${orgZip} ${orgCountry}`.trim());
+    try {
+      renderInvoicePdf(doc, invoice.toObject ? invoice.toObject() : invoice, buyer);
+    } catch (err) {
+      logger.error('Invoice PDF render failed', { invoiceId, error: err.message });
     }
-
-    doc.moveDown();
-    doc.fontSize(12).text('Invoice Summary', { underline: true });
-    doc.fontSize(10)
-      .text(`Subtotal: Rs. ${invoice.subtotal}`)
-      .text(`Tax: Rs. ${invoice.tax}`)
-      .text(`Discount: Rs. ${invoice.discount}`)
-      .text(`Total Amount: Rs. ${invoice.totalAmount}`, { underline: true });
-
-    doc.moveDown();
-    doc.fontSize(12).text('Payment Status', { underline: true });
-    doc.fontSize(10).text(`Status: ${invoice.paymentStatus.toUpperCase()}`);
-
-    if (invoice.paymentStatus === 'completed') {
-      doc.text(`Payment Date: ${invoice.paymentDate.toLocaleDateString()}`);
-      doc.text(`Transaction ID: ${invoice.transactionId}`);
-    }
-
     doc.end();
   }
 

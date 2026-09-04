@@ -22,31 +22,48 @@ const calculateBreakdown = async (studentId, organizationId) => {
     const profile = await StudentProfile.findOne({ user: studentId });
     if (!profile) return null;
 
-    const analytics = await InterviewAnalytics.find({ student: studentId, organization: organizationId });
-    const sessions = await InterviewSession.find({ student: studentId, organization: organizationId });
-    const insights = await PerformanceInsight.find({ student: studentId });
+    // Readiness is about the student — score across ALL their interviews, not
+    // just one org's. (organizationId is kept for the history record only.)
+    const analytics = await InterviewAnalytics.find({ student: studentId });
 
     const academicPerformance = Math.min(100, Math.round((profile.cgpa || 0) / 10 * 100 + (profile.attendance || 0) * 0.5));
 
-    const codingRounds = analytics.filter(a => a.roundAnalytics.some(r => r.roundType === 'coding'));
-    const codingScore = codingRounds.length > 0
-        ? Math.round(codingRounds.reduce((sum, a) => sum + (a.overallScore || 0), 0) / codingRounds.length)
-        : Math.round((profile.codingScore || 0) + (profile.externalMetrics?.leetcode?.contestRating || 0) * 0.1);
-
-    const aptitudeRounds = analytics.filter(a => a.roundAnalytics.some(r => r.roundType === 'aptitude'));
-    const aptitudeScore = aptitudeRounds.length > 0
-        ? Math.round(aptitudeRounds.reduce((sum, a) => sum + (a.overallScore || 0), 0) / aptitudeRounds.length)
-        : profile.aptitudeScore || 0;
-
-    const communicationScore = profile.communicationScore || 0;
-    if (sessions.length > 0) {
-        const latestAnalytics = await InterviewAnalytics.findOne({ student: studentId }).sort({ createdAt: -1 });
-        if (latestAnalytics) {
-            communicationScore = Math.max(communicationScore, latestAnalytics.skillScores?.communication || 0);
+    // Per-dimension score from real interview rounds. Uses the round's own
+    // normalised score (0-100) — never a stale profile field. A round is only
+    // counted if enough questions were actually attempted to be meaningful
+    // (an abandoned 1-question round isn't a real assessment).
+    const MIN_ATTEMPTS = { aptitude: 5, coding: 2, technical: 1, hr: 1 };
+    const roundAvg = (roundType) => {
+        const min = MIN_ATTEMPTS[roundType] ?? 1;
+        const perRound = [];
+        for (const a of analytics) {
+            const r = (a.roundAnalytics || []).find((x) => x.roundType === roundType);
+            if (r && (r.questionsAttempted || 0) >= min) {
+                const max = r.maxPossibleScore || 100;
+                perRound.push(Math.max(0, Math.min(100, Math.round((r.totalScore / max) * 100))));
+            }
         }
+        return perRound.length ? Math.round(perRound.reduce((s, v) => s + v, 0) / perRound.length) : null;
+    };
+
+    const lc = profile.externalMetrics?.leetcode || {};
+    const solved = lc.totalSolved || (lc.easySolved || 0) + (lc.mediumSolved || 0) + (lc.hardSolved || 0);
+    const externalCoding = lc.isVerified && solved
+        ? Math.min(100, Math.round(solved / 5 + (lc.contestRating || 0) * 0.02))
+        : 0;
+    const codingScore = roundAvg('coding') ?? externalCoding;
+
+    const aptitudeScore = roundAvg('aptitude') ?? 0;
+
+    let communicationScore = 0;
+    const commSamples = analytics
+        .map((a) => a.skillScores?.communication)
+        .filter((v) => typeof v === 'number' && v > 0);
+    if (commSamples.length) {
+        communicationScore = Math.round(commSamples.reduce((s, v) => s + v, 0) / commSamples.length);
     }
 
-    const mockRounds = analytics.filter(a => a.roundAnalytics.some(r => r.roundType === 'technical' || r.roundType === 'hr'));
+    const mockRounds = analytics.filter(a => (a.roundAnalytics || []).some(r => r.roundType === 'technical' || r.roundType === 'hr'));
     const mockInterviewPerformance = mockRounds.length > 0
         ? Math.round(mockRounds.reduce((sum, a) => sum + (a.overallScore || 0), 0) / mockRounds.length)
         : 0;
@@ -86,7 +103,7 @@ const calculateBreakdown = async (studentId, organizationId) => {
     return { overallScore, breakdown };
 };
 
-const updateStudentReadinessScore = async (studentId, organizationId, recordedBy = 'system', notes = '') => {
+const updateStudentReadinessScore = async (studentId, organizationId = null, recordedBy = 'system', notes = '') => {
     const result = await calculateBreakdown(studentId, organizationId);
     if (!result) return null;
 
@@ -101,9 +118,7 @@ const updateStudentReadinessScore = async (studentId, organizationId, recordedBy
 
     let trend = 'stable';
     if (previousScores.length > 0) {
-        const current = overallScore;
-        const previous = previousScores[0].overallScore;
-        const diff = current - previous;
+        const diff = overallScore - previousScores[0].overallScore;
         if (diff > 2) trend = 'improving';
         else if (diff < -2) trend = 'declining';
     }
@@ -115,17 +130,30 @@ const updateStudentReadinessScore = async (studentId, organizationId, recordedBy
     profile.codingScore = breakdown.codingPerformance;
     profile.communicationScore = breakdown.communicationSkills;
     profile.skillGaps = deriveSkillGaps(breakdown);
+    profile.mockHistoryCount = await InterviewSession.countDocuments({ student: studentId, status: 'completed' });
     await profile.save();
 
-    await PlacementScoreHistory.create({
-        student: studentId,
-        organization: organizationId,
-        overallScore,
-        scoreBreakdown: breakdown,
-        trend,
-        recordedBy,
-        notes
-    });
+    // Resolve an org for the history row (it needs one). Fall back to the
+    // student's college; skip the history write entirely if there's still none.
+    let orgId = organizationId;
+    if (!orgId) {
+        const student = await User.findById(studentId).select('organization').lean();
+        if (student?.organization) {
+            const org = await require('../models/OrganizationModel').findOne({ organizationName: student.organization }).select('_id').lean();
+            orgId = org?._id || null;
+        }
+    }
+    if (orgId) {
+        await PlacementScoreHistory.create({
+            student: studentId,
+            organization: orgId,
+            overallScore,
+            scoreBreakdown: breakdown,
+            trend,
+            recordedBy,
+            notes,
+        });
+    }
 
     return { profile, trend };
 };

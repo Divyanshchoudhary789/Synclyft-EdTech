@@ -9,6 +9,7 @@ import { Button } from "@synclyft/ui/components/Button";
 import { getGradeBand, getGradeColor } from "@synclyft/lib/utils";
 import { FileText, Download, AlertCircle } from "lucide-react";
 import toast from "react-hot-toast";
+import { PageHeader } from "@/components/PageHeader";
 
 interface Summary {
   activeStudents?: number; activeBatches?: number; totalBatches?: number;
@@ -77,17 +78,18 @@ export default function OfficerReportsPage() {
   ];
 
   return (
-    <div className="p-6 md:p-8 space-y-6">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-lg font-semibold" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>Placement reports</h1>
-          <p className="text-xs" style={{ color: "var(--th-text-faint)" }}>Board-ready summary of your cohort&apos;s interview readiness</p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="secondary" loading={downloading === "csv"} onClick={() => download("csv")} icon={<Download size={13} />}>CSV</Button>
-          <Button loading={downloading === "pdf"} onClick={() => download("pdf")} icon={<Download size={13} />}>PDF</Button>
-        </div>
-      </div>
+    <div className="p-5 sm:p-6 md:p-8 space-y-6">
+      <PageHeader
+        eyebrow="Board pack"
+        title="Placement reports"
+        subtitle="Board-ready summary of your cohort's interview readiness"
+        actions={
+          <>
+            <Button variant="secondary" loading={downloading === "csv"} onClick={() => download("csv")} icon={<Download size={13} />}>CSV</Button>
+            <Button loading={downloading === "pdf"} onClick={() => download("pdf")} icon={<Download size={13} />}>PDF</Button>
+          </>
+        }
+      />
 
       {error && (
         <div className="flex items-center gap-2 rounded-xl border p-4 text-sm" style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-card-bg)", color: "var(--th-text-secondary)" }}>
@@ -97,10 +99,10 @@ export default function OfficerReportsPage() {
       )}
 
       {loading ? (
-        <div className="grid gap-4 sm:grid-cols-4"><SkeletonCard className="h-24" /><SkeletonCard className="h-24" /><SkeletonCard className="h-24" /><SkeletonCard className="h-24" /></div>
+        <div className="grid gap-4 grid-cols-2 lg:grid-cols-4"><SkeletonCard className="h-24" /><SkeletonCard className="h-24" /><SkeletonCard className="h-24" /><SkeletonCard className="h-24" /></div>
       ) : (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
             {kpis.map((k) => (
               <div key={k.label} className="rounded-2xl border p-5" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
                 <p className="text-[10px] uppercase font-bold tracking-wider" style={{ color: "var(--th-text-faint)" }}>{k.label}</p>
@@ -112,17 +114,21 @@ export default function OfficerReportsPage() {
           {batchRows.length > 0 && (
             <div className="rounded-2xl border overflow-hidden" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
               <div className="px-6 py-3 border-b text-xs font-bold" style={{ borderColor: "var(--th-border)", color: "var(--th-text-primary)" }}>Batch performance</div>
-              <div className="grid grid-cols-[2fr_1fr_1fr_1fr] px-6 py-2 text-[10px] font-bold uppercase" style={{ color: "var(--th-text-faint)" }}>
-                <span>Batch</span><span>Students</span><span>Avg score</span><span>Band</span>
-              </div>
-              {batchRows.map((b, i) => (
-                <div key={i} className="grid grid-cols-[2fr_1fr_1fr_1fr] px-6 py-2.5 border-t text-xs items-center" style={{ borderColor: "var(--th-border)", color: "var(--th-text-secondary)" }}>
-                  <span className="truncate">{b.batchName} <span style={{ color: "var(--th-text-faint)" }}>· {b.department} · {b.graduationYear}</span></span>
-                  <span className="font-mono">{b.studentCount ?? 0}</span>
-                  <span className="font-mono">{Math.round(Number(b.averageScore ?? 0))}</span>
-                  <span className="capitalize">{b.readinessBand ?? "—"}</span>
+              <div className="overflow-x-auto">
+                <div className="min-w-[440px]">
+                  <div className="grid grid-cols-[2fr_1fr_1fr_1fr] px-6 py-2 text-[10px] font-bold uppercase" style={{ color: "var(--th-text-faint)" }}>
+                    <span>Batch</span><span>Students</span><span>Avg score</span><span>Band</span>
+                  </div>
+                  {batchRows.map((b, i) => (
+                    <div key={i} className="grid grid-cols-[2fr_1fr_1fr_1fr] px-6 py-2.5 border-t text-xs items-center" style={{ borderColor: "var(--th-border)", color: "var(--th-text-secondary)" }}>
+                      <span className="truncate">{b.batchName} <span style={{ color: "var(--th-text-faint)" }}>· {b.department} · {b.graduationYear}</span></span>
+                      <span className="font-mono">{b.studentCount ?? 0}</span>
+                      <span className="font-mono">{Math.round(Number(b.averageScore ?? 0))}</span>
+                      <span className="capitalize">{b.readinessBand ?? "—"}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              </div>
             </div>
           )}
 

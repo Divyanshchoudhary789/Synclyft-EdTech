@@ -13,7 +13,7 @@ const { validate } = require("../middlewares/validationMiddleware.js");
 const { interviewSchemas } = require("../utils/validationSchemas.js");
 
 
-const { startInterviewSession, endInterviewSession, getInterviewState, initializeAptitudeBatchSession, getAptitudeRoundQuestion, submitAptitudeRound, getCodingRoundQuestions, submitCodingRound, startTechnicalRoundSession, getTechnicalRoundQuestion, submitTechnicalRound, startHrRoundSession } = require("../controllers/interviewController.js");
+const { startInterviewSession, endInterviewSession, getInterviewState, initializeAptitudeBatchSession, getAptitudeRoundQuestion, getAptitudeProgress, submitAptitudeRound, getCodingRoundQuestions, submitCodingRound, runCodingRound, startTechnicalRoundSession, getTechnicalRoundQuestion, submitTechnicalRound, startHrRoundSession } = require("../controllers/interviewController.js");
 
 const enforceRoundTimer = require("../middlewares/enforceRoundTimer.js");
 
@@ -37,6 +37,7 @@ interviewRouter.post("/initialize", uploadResume.single("resume"), handleUploadE
 interviewRouter.use("/session/:sessionId", verifyInterviewOwnership);
 interviewRouter.use("/initialize/aptitude-batchSession/:sessionId", verifyInterviewOwnership);
 interviewRouter.use("/aptitude-round-questions/:sessionId", verifyInterviewOwnership);
+interviewRouter.use("/aptitude-round-progress/:sessionId", verifyInterviewOwnership);
 interviewRouter.use("/coding-round-questions/:sessionId", verifyInterviewOwnership);
 interviewRouter.use("/technical-round-questions/:sessionId", verifyInterviewOwnership);
 
@@ -47,10 +48,12 @@ interviewRouter.post("/session/:sessionId/terminate", endInterviewSession);
 // Aptitude Round
 interviewRouter.post("/initialize/aptitude-batchSession/:sessionId", validate(interviewSchemas.initializeAptitudeBatch, 'body'), initializeAptitudeBatchSession);
 interviewRouter.post("/aptitude-round-questions/:sessionId", validate(interviewSchemas.getAptitudeQuestion, 'body'), getAptitudeRoundQuestion);
+interviewRouter.get("/aptitude-round-progress/:sessionId", getAptitudeProgress);
 interviewRouter.post("/session/:sessionId/submit-aptitude", enforceRoundTimer("aptitude"), validate(interviewSchemas.submitAptitude, 'body'), submitAptitudeRound);
 
 // Coding Round
 interviewRouter.get("/coding-round-questions/:sessionId", getCodingRoundQuestions);
+interviewRouter.post("/session/:sessionId/run-coding", validate(interviewSchemas.submitCoding, 'body'), runCodingRound);
 interviewRouter.post("/session/:sessionId/submit-coding", enforceRoundTimer("coding"), validate(interviewSchemas.submitCoding, 'body'), submitCodingRound);
 
 // Technical Round

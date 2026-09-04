@@ -6,6 +6,7 @@ import { toApiError } from "@synclyft/lib/api";
 import { Sparkles, Loader2, Send, TrendingUp, Users, ShieldAlert } from "lucide-react";
 import toast from "react-hot-toast";
 import { CountUp } from "@synclyft/ui/components/CountUp";
+import { PageHeader } from "@/components/PageHeader";
 
 const SUGGESTIONS = [
   "Which students are at risk and need intervention?",
@@ -63,13 +64,13 @@ export default function OfficerQueryPage() {
   const dist = insights?.readinessDistribution;
 
   return (
-    <div className="p-6 md:p-8 max-w-4xl mx-auto space-y-8">
-      <div>
-        <h1 className="text-lg font-semibold flex items-center gap-2" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
-          <Sparkles size={18} className="text-blue-500" /> Ask your data
-        </h1>
-        <p className="text-xs" style={{ color: "var(--th-text-faint)" }}>AI answers grounded in your cohort&apos;s real interview and readiness data</p>
-      </div>
+    <div className="p-5 sm:p-6 md:p-8 max-w-4xl mx-auto space-y-7">
+      <PageHeader
+        eyebrow="Assistant"
+        icon={<Sparkles size={18} className="text-blue-500" />}
+        title="Ask your data"
+        subtitle="AI answers grounded in your cohort's real interview and readiness data"
+      />
 
       <form onSubmit={(e) => { e.preventDefault(); ask(q); }} className="flex gap-2">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ask about your students…"
@@ -114,7 +115,7 @@ export default function OfficerQueryPage() {
           )}
 
           {o && (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
               {[
                 { label: "Placement-ready", value: o.placementReadyStudents, icon: Users, color: "#3DDC84" },
                 { label: "At risk", value: o.atRiskStudents, icon: ShieldAlert, color: "#FF5C5C" },
@@ -145,9 +146,18 @@ export default function OfficerQueryPage() {
                   <div key={b.k} style={{ flexGrow: b.v, backgroundColor: b.c }} title={`${b.k}: ${b.v}`} />
                 ))}
               </div>
-              <div className="mt-2 flex flex-wrap gap-3 text-[10px]" style={{ color: "var(--th-text-muted)" }}>
-                <span>🟢 Excellent {dist.excellent}</span><span>🔵 Good {dist.good}</span>
-                <span>🟡 Needs focus {dist.needsFocus}</span><span>🔴 At risk {dist.atRisk}</span>
+              <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1.5 text-[10px]" style={{ color: "var(--th-text-muted)" }}>
+                {[
+                  { label: "Excellent", v: dist.excellent, c: "#3DDC84" },
+                  { label: "Good", v: dist.good, c: "#0062FF" },
+                  { label: "Needs focus", v: dist.needsFocus, c: "#F59E0B" },
+                  { label: "At risk", v: dist.atRisk, c: "#FF5C5C" },
+                ].map((b) => (
+                  <span key={b.label} className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: b.c }} />
+                    {b.label} <span className="font-mono" style={{ color: "var(--th-text-secondary)" }}>{b.v}</span>
+                  </span>
+                ))}
               </div>
             </div>
           )}
@@ -155,6 +165,7 @@ export default function OfficerQueryPage() {
           {(insights.batchPerformance ?? []).length > 0 && (
             <div className="rounded-2xl border overflow-hidden" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
               <div className="px-5 py-3 border-b text-xs font-bold" style={{ borderColor: "var(--th-border)", color: "var(--th-text-primary)" }}>Batch performance</div>
+              <div className="overflow-x-auto"><div className="min-w-[440px]">
               <div className="grid grid-cols-[2fr_1fr_1fr_1fr] px-5 py-2 text-[10px] font-bold uppercase" style={{ color: "var(--th-text-faint)" }}>
                 <span>Batch</span><span>Students</span><span>Avg readiness</span><span>Avg score</span>
               </div>
@@ -166,6 +177,7 @@ export default function OfficerQueryPage() {
                   <span className="font-mono">{b.averageScore}</span>
                 </div>
               ))}
+              </div></div>
             </div>
           )}
 

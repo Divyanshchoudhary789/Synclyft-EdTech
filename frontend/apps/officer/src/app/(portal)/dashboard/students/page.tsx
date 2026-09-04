@@ -3,12 +3,17 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { collegeAdminService } from "@synclyft/lib/api/services";
-import { toApiError } from "@synclyft/lib/api";
+import { API_BASE_URL, toApiError } from "@synclyft/lib/api";
 import { getGradeBand, getGradeColor } from "@synclyft/lib/utils";
 import { Badge } from "@synclyft/ui/components/Badge";
 import { Button } from "@synclyft/ui/components/Button";
 import { SkeletonBlock } from "@synclyft/ui/components/SkeletonBlock";
-import { Search, AlertCircle, Users, X, Loader2, TrendingUp, ShieldAlert, Megaphone } from "lucide-react";
+import { Modal } from "@synclyft/ui/components/Modal";
+import {
+  Search, AlertCircle, Users, X, Loader2, TrendingUp, ShieldAlert, Megaphone, Download,
+  CalendarClock, SlidersHorizontal, GraduationCap, Layers, Sparkles, FileText,
+} from "lucide-react";
+import { PageHeader } from "@/components/PageHeader";
 import toast from "react-hot-toast";
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, RadarChart, Radar, PolarGrid, PolarAngleAxis,
@@ -106,22 +111,23 @@ function StudentsInner() {
   const closeStudent = () => { setOpenId(null); router.replace("/dashboard/students", { scroll: false }); };
 
   return (
-    <div className="p-6 md:p-8 space-y-6">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-lg font-semibold" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>Students</h1>
-          <p className="text-xs" style={{ color: "var(--th-text-faint)" }}>{total} students · readiness tracked from mock interviews</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" size="sm" icon={<Megaphone size={13} />} onClick={() => setAnnounce(true)}>Announce</Button>
-          <div className="relative">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--th-text-faint)" }} />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, email, branch…"
-              className="pl-9 pr-3 py-2 rounded-lg border text-xs w-64"
-              style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }} />
+    <div className="p-5 sm:p-6 md:p-8 space-y-6">
+      <PageHeader
+        eyebrow="Cohort"
+        title="Students"
+        subtitle={`${total} students · readiness tracked from mock interviews`}
+        actions={
+          <div className="flex w-full items-center gap-2 sm:w-auto">
+            <Button variant="secondary" size="sm" className="shrink-0" icon={<Megaphone size={13} />} onClick={() => setAnnounce(true)}>Announce</Button>
+            <div className="relative flex-1 sm:w-64 sm:flex-none">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--th-text-faint)" }} />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, email, branch…"
+                className="pl-9 pr-3 py-2 rounded-lg border text-xs w-full"
+                style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }} />
+            </div>
           </div>
-        </div>
-      </div>
+        }
+      />
 
       <div className="flex flex-wrap items-center gap-2">
         {BANDS.map((b) => (
@@ -264,6 +270,30 @@ function StudentDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   const [data, setData] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [dl, setDl] = useState<"csv" | "pdf" | null>(null);
+  const [action, setAction] = useState<null | "followup" | "intel">(null);
+  const [nonce, setNonce] = useState(0);
+
+  const download = async (format: "csv" | "pdf") => {
+    setDl(format);
+    try {
+      const res = await fetch(`${API_BASE_URL}/college-admin/reports/students/${id}/download?format=${format}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Report export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `student-report.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(toApiError(err).message);
+    } finally {
+      setDl(null);
+    }
+  };
 
   useEffect(() => {
     let alive = true;
@@ -273,7 +303,7 @@ function StudentDrawer({ id, onClose }: { id: string; onClose: () => void }) {
       .catch((err) => { if (alive) setError(toApiError(err).message); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [id]);
+  }, [id, nonce]);
 
   const student = (data?.student ?? {}) as Record<string, unknown>;
   const profile = (data?.profile ?? null) as Record<string, unknown> | null;
@@ -284,112 +314,337 @@ function StudentDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   const insights = (data?.insights ?? []) as Record<string, unknown>[];
 
   const readiness = Math.round(Number(profile?.placementReadinessScore ?? 0));
+  const band = getGradeBand(readiness);
+  const bandColor = getGradeColor(band);
   const breakdown = profile?.scoreBreakdown
     ? Object.entries(SCORE_LABELS).map(([k, label]) => ({ subject: label, score: Math.round(Number((profile.scoreBreakdown as Record<string, number>)[k] ?? 0)) }))
     : [];
+  const hasBreakdown = breakdown.length > 0 && breakdown.some((b) => b.score > 0);
   const trend = [...history].reverse().map((h) => ({
     date: new Date(String(h.recordedAt ?? h.createdAt)).toLocaleDateString("en-IN", { day: "numeric", month: "short" }),
     score: Math.round(Number(h.overallScore ?? 0)),
   }));
+  const skills = ((profile?.skills as string[]) ?? []).filter(Boolean);
+  const latestScore = Math.round(Number(analytics[0]?.overallScore ?? 0));
+  const mockCount = Number(profile?.mockHistoryCount ?? sessions.length);
+  const initials = String(student.name ?? "S").trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+
+  const card = "rounded-2xl border p-4";
+  const cardStyle = { backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" };
+  const sectionTitle = "text-[11px] font-bold uppercase tracking-wider mb-2.5";
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative w-full max-w-xl h-full overflow-y-auto shadow-2xl" style={{ backgroundColor: "var(--th-bg)" }}>
-        <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-bg)" }}>
-          <div>
-            <h2 className="text-sm font-bold" style={{ color: "var(--th-text-primary)" }}>{String(student.name ?? "Student")}</h2>
-            <p className="text-[11px] font-mono" style={{ color: "var(--th-text-faint)" }}>{String(student.email ?? "")}</p>
-          </div>
-          <button onClick={onClose} style={{ color: "var(--th-text-faint)" }}><X size={18} /></button>
+    <Modal
+      open
+      onClose={onClose}
+      size="xl"
+      icon={
+        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-tr from-[#0062FF] to-[#4D7CFF] text-xs font-bold text-white">
+          {initials}
+        </span>
+      }
+      title={String(student.name ?? "Student")}
+      subtitle={String(student.email ?? "")}
+      headerRight={
+        !loading && !error ? (
+          <span className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold"
+            style={{ backgroundColor: bandColor + "1f", color: bandColor }}>
+            {readiness}<span className="text-[10px] font-medium opacity-70">/100</span>
+          </span>
+        ) : undefined
+      }
+      footer={
+        !loading && !error ? (
+          <>
+            <Button variant="ghost" size="sm" icon={<CalendarClock size={13} />} onClick={() => setAction(action === "followup" ? null : "followup")}>Follow-up</Button>
+            <Button variant="ghost" size="sm" icon={<SlidersHorizontal size={13} />} onClick={() => setAction(action === "intel" ? null : "intel")}>Edit scores</Button>
+            <Button variant="secondary" size="sm" loading={dl === "csv"} icon={<Download size={13} />} onClick={() => download("csv")}>CSV</Button>
+            <Button size="sm" loading={dl === "pdf"} icon={<FileText size={13} />} onClick={() => download("pdf")}>PDF report</Button>
+          </>
+        ) : undefined
+      }
+    >
+      {loading ? (
+        <div className="space-y-4">
+          <div className="grid grid-cols-3 gap-3">{[0, 1, 2].map((i) => <SkeletonBlock key={i} height="h-16" className="rounded-xl" />)}</div>
+          <SkeletonBlock height="h-20" className="rounded-2xl" />
+          <SkeletonBlock height="h-48" className="rounded-2xl" />
         </div>
+      ) : error ? (
+        <div className="flex items-center gap-2 py-6 text-sm" style={{ color: "var(--th-text-secondary)" }}>
+          <AlertCircle size={16} className="text-amber-500" /> {error}
+        </div>
+      ) : (
+        <div className="space-y-5">
+          {action === "followup" && (
+            <FollowUpPanel studentId={id} studentName={String(student.name ?? "student")} onClose={() => setAction(null)} />
+          )}
+          {action === "intel" && (
+            <IntelPanel studentId={id} profile={profile} onClose={() => setAction(null)} onSaved={() => { setAction(null); setNonce((n) => n + 1); }} />
+          )}
 
-        {loading ? (
-          <div className="p-6"><Loader2 size={20} className="animate-spin" style={{ color: "var(--th-primary)" }} /></div>
-        ) : error ? (
-          <div className="p-6 text-sm" style={{ color: "var(--th-text-secondary)" }}><AlertCircle size={16} className="inline mr-2 text-amber-500" />{error}</div>
-        ) : (
-          <div className="p-6 space-y-6">
-            <div className="grid grid-cols-3 gap-3">
-              {[
-                { label: "Readiness", value: readiness },
-                { label: "Mock interviews", value: Number(profile?.mockHistoryCount ?? sessions.length) },
-                { label: "Latest score", value: Math.round(Number(analytics[0]?.overallScore ?? 0)) || "—" },
-              ].map((k) => (
-                <div key={k.label} className="rounded-xl border p-3" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
-                  <p className="text-[10px] uppercase font-bold" style={{ color: "var(--th-text-faint)" }}>{k.label}</p>
-                  <p className="mt-1 text-lg font-bold" style={{ color: "var(--th-text-primary)" }}>{k.value}</p>
-                </div>
-              ))}
-            </div>
-
-            <div className="text-xs space-y-1" style={{ color: "var(--th-text-secondary)" }}>
-              <p><span style={{ color: "var(--th-text-faint)" }}>Branch:</span> {String(profile?.branch ?? "—")}{profile?.graduationYear ? ` · ${profile.graduationYear}` : ""}</p>
-              <p><span style={{ color: "var(--th-text-faint)" }}>Batch:</span> {batch ? `${batch.batchName} (${batch.department ?? "—"})` : "Not assigned"}</p>
-              <p><span style={{ color: "var(--th-text-faint)" }}>Skills:</span> {((profile?.skills as string[]) ?? []).slice(0, 8).join(", ") || "—"}</p>
-            </div>
-
-            {breakdown.length > 0 && breakdown.some((b) => b.score > 0) && (
-              <div className="rounded-2xl border p-4" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
-                <p className="text-xs font-bold mb-2" style={{ color: "var(--th-text-primary)" }}>Readiness breakdown</p>
-                <ResponsiveContainer width="100%" height={200}>
-                  <RadarChart data={breakdown}>
-                    <PolarGrid stroke="var(--th-border)" />
-                    <PolarAngleAxis dataKey="subject" tick={{ fontSize: 9, fill: "var(--th-text-muted)" }} />
-                    <Radar dataKey="score" stroke="#0062FF" fill="#0062FF" fillOpacity={0.25} />
-                  </RadarChart>
-                </ResponsiveContainer>
+          {/* Stat tiles */}
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { label: "Readiness", value: readiness, color: bandColor, suffix: "/100" },
+              { label: "Mock interviews", value: mockCount },
+              { label: "Latest score", value: latestScore || "—", suffix: latestScore ? `· ${String(analytics[0]?.finalGrade ?? "")}` : "" },
+            ].map((k) => (
+              <div key={k.label} className="rounded-xl border p-3.5" style={cardStyle}>
+                <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: "var(--th-text-faint)" }}>{k.label}</p>
+                <p className="mt-1.5 text-xl font-bold" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: k.color ?? "var(--th-text-primary)" }}>
+                  {k.value}
+                  {k.suffix && <span className="ml-1 text-[11px] font-medium" style={{ color: "var(--th-text-faint)" }}>{k.suffix}</span>}
+                </p>
               </div>
-            )}
+            ))}
+          </div>
 
-            {trend.length >= 2 && (
-              <div className="rounded-2xl border p-4" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
-                <p className="text-xs font-bold mb-2 flex items-center gap-1.5" style={{ color: "var(--th-text-primary)" }}><TrendingUp size={12} /> Score history</p>
-                <ResponsiveContainer width="100%" height={120}>
-                  <AreaChart data={trend} margin={{ left: -20, top: 4 }}>
-                    <XAxis dataKey="date" tick={{ fontSize: 9, fill: "var(--th-text-faint)" }} axisLine={false} tickLine={false} />
-                    <YAxis domain={[0, 100]} tick={{ fontSize: 9, fill: "var(--th-text-faint)" }} axisLine={false} tickLine={false} />
-                    <Tooltip contentStyle={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)", borderRadius: 8, fontSize: 11 }} />
-                    <Area dataKey="score" stroke="#0062FF" fill="#0062FF" fillOpacity={0.15} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-
-            <div>
-              <p className="text-xs font-bold mb-2" style={{ color: "var(--th-text-primary)" }}>Recent interviews</p>
-              {sessions.length === 0 ? (
-                <p className="text-xs" style={{ color: "var(--th-text-faint)" }}>No interviews yet.</p>
+          {/* About */}
+          <div className={card} style={cardStyle}>
+            <p className={sectionTitle} style={{ color: "var(--th-text-faint)" }}>Profile</p>
+            <div className="grid gap-x-6 gap-y-2 text-xs sm:grid-cols-2">
+              <Row icon={<GraduationCap size={13} />} label="Branch / year" value={`${String(profile?.branch ?? "—")}${profile?.graduationYear ? ` · ${profile.graduationYear}` : ""}`} />
+              <Row icon={<Layers size={13} />} label="Batch" value={batch ? `${batch.batchName}${batch.department ? ` · ${batch.department}` : ""}` : "Not assigned"} />
+            </div>
+            <div className="mt-3">
+              <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide" style={{ color: "var(--th-text-faint)" }}>Skills</p>
+              {skills.length === 0 ? (
+                <span className="text-xs" style={{ color: "var(--th-text-faint)" }}>None listed</span>
               ) : (
-                <div className="rounded-xl border overflow-hidden" style={{ borderColor: "var(--th-card-border)" }}>
-                  {sessions.slice(0, 6).map((s, i) => (
-                    <div key={i} className="flex items-center gap-3 px-3 py-2 border-b last:border-0 text-xs" style={{ borderColor: "var(--th-border)" }}>
-                      <span className="flex-1 truncate" style={{ color: "var(--th-text-secondary)" }}>{String(s.targetRole ?? "Mock interview")}</span>
-                      <span style={{ color: "var(--th-text-faint)" }}>{s.startedAt ? new Date(String(s.startedAt)).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "—"}</span>
-                      {s.status === "completed"
-                        ? <Badge variant="verdant">{Math.round(Number(s.finalCompositeScore ?? 0))}% · {String(s.finalGrade ?? "")}</Badge>
-                        : <Badge variant="neutral">{String(s.status ?? "")}</Badge>}
-                    </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {skills.slice(0, 14).map((s) => (
+                    <span key={s} className="rounded-full border px-2 py-0.5 text-[11px]" style={{ borderColor: "var(--th-border)", color: "var(--th-text-secondary)" }}>{s}</span>
                   ))}
                 </div>
               )}
             </div>
+          </div>
 
-            {Boolean(insights[0]?.narrativeSummary) && (
-              <div className="rounded-2xl border p-4 space-y-2" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
-                <p className="text-xs font-bold" style={{ color: "var(--th-text-primary)" }}>Latest AI summary</p>
-                <p className="text-xs leading-relaxed" style={{ color: "var(--th-text-secondary)" }}>{String(insights[0].narrativeSummary)}</p>
-                {((insights[0].weaknesses as string[]) ?? []).length > 0 && (
-                  <p className="text-[11px] flex items-start gap-1.5" style={{ color: "var(--th-text-muted)" }}>
-                    <ShieldAlert size={12} className="mt-0.5 shrink-0 text-amber-500" />
-                    {((insights[0].weaknesses as string[]) ?? []).slice(0, 3).join(" · ")}
+          {/* Charts */}
+          {(hasBreakdown || trend.length >= 2) && (
+            <div className="grid gap-4 lg:grid-cols-2">
+              {hasBreakdown && (
+                <div className={card} style={cardStyle}>
+                  <p className={sectionTitle} style={{ color: "var(--th-text-primary)" }}>Readiness breakdown</p>
+                  <ResponsiveContainer width="100%" height={210}>
+                    <RadarChart data={breakdown}>
+                      <PolarGrid stroke="var(--th-border)" />
+                      <PolarAngleAxis dataKey="subject" tick={{ fontSize: 9, fill: "var(--th-text-muted)" }} />
+                      <Radar dataKey="score" stroke="#0062FF" fill="#0062FF" fillOpacity={0.22} />
+                    </RadarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+              {trend.length >= 2 && (
+                <div className={card} style={cardStyle}>
+                  <p className={`${sectionTitle} flex items-center gap-1.5`} style={{ color: "var(--th-text-primary)" }}>
+                    <TrendingUp size={12} /> Readiness history
                   </p>
-                )}
+                  <ResponsiveContainer width="100%" height={210}>
+                    <AreaChart data={trend} margin={{ left: -18, top: 6 }}>
+                      <XAxis dataKey="date" tick={{ fontSize: 9, fill: "var(--th-text-faint)" }} axisLine={false} tickLine={false} />
+                      <YAxis domain={[0, 100]} tick={{ fontSize: 9, fill: "var(--th-text-faint)" }} axisLine={false} tickLine={false} />
+                      <Tooltip contentStyle={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)", borderRadius: 10, fontSize: 11 }} />
+                      <Area dataKey="score" stroke="#0062FF" fill="#0062FF" fillOpacity={0.15} strokeWidth={2} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Recent interviews */}
+          <div>
+            <p className={sectionTitle} style={{ color: "var(--th-text-primary)" }}>Recent interviews</p>
+            {sessions.length === 0 ? (
+              <p className="rounded-xl border px-3 py-4 text-center text-xs" style={{ borderColor: "var(--th-card-border)", color: "var(--th-text-faint)" }}>No mock interviews yet.</p>
+            ) : (
+              <div className="divide-y overflow-hidden rounded-xl border" style={{ borderColor: "var(--th-card-border)" }}>
+                {sessions.slice(0, 8).map((s, i) => (
+                  <div key={i} className="flex items-center gap-3 px-3.5 py-2.5 text-xs" style={{ borderColor: "var(--th-border)" }}>
+                    <span className="flex-1 truncate font-medium" style={{ color: "var(--th-text-primary)" }}>{String(s.targetRole ?? "Mock interview")}</span>
+                    <span className="shrink-0 font-mono text-[10px]" style={{ color: "var(--th-text-faint)" }}>
+                      {s.startedAt ? new Date(String(s.startedAt)).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "—"}
+                    </span>
+                    {s.status === "completed"
+                      ? <Badge variant="verdant">{Math.round(Number(s.finalCompositeScore ?? 0))}%{s.finalGrade ? ` · ${String(s.finalGrade)}` : ""}</Badge>
+                      : <Badge variant="neutral">{String(s.status ?? "—")}</Badge>}
+                  </div>
+                ))}
               </div>
             )}
           </div>
-        )}
-      </div>
+
+          {/* AI summary */}
+          {Boolean(insights[0]?.narrativeSummary) && (
+            <div className="rounded-2xl border p-4" style={{ backgroundColor: "color-mix(in srgb, var(--th-primary) 5%, transparent)", borderColor: "color-mix(in srgb, var(--th-primary) 20%, transparent)" }}>
+              <p className={`${sectionTitle} flex items-center gap-1.5`} style={{ color: "var(--th-text-primary)" }}>
+                <Sparkles size={12} className="text-blue-500" /> Latest AI summary
+              </p>
+              <p className="text-xs leading-relaxed" style={{ color: "var(--th-text-secondary)" }}>{String(insights[0].narrativeSummary)}</p>
+              {((insights[0].weaknesses as string[]) ?? []).length > 0 && (
+                <p className="mt-2 flex items-start gap-1.5 text-[11px]" style={{ color: "var(--th-text-muted)" }}>
+                  <ShieldAlert size={12} className="mt-0.5 shrink-0 text-amber-500" />
+                  {((insights[0].weaknesses as string[]) ?? []).slice(0, 4).join(" · ")}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function Row({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="shrink-0" style={{ color: "var(--th-text-faint)" }}>{icon}</span>
+      <span className="shrink-0" style={{ color: "var(--th-text-faint)" }}>{label}</span>
+      <span className="min-w-0 truncate font-medium" style={{ color: "var(--th-text-primary)" }}>{value}</span>
+    </div>
+  );
+}
+
+const FOLLOWUP_TYPES = [
+  { value: "performance_alert", label: "Performance alert" },
+  { value: "deadline_reminder", label: "Deadline reminder" },
+  { value: "follow_up_pending", label: "General follow-up" },
+  { value: "recommendation_assigned", label: "Recommendation assigned" },
+];
+
+function FollowUpPanel({ studentId, studentName, onClose }: { studentId: string; studentName: string; onClose: () => void }) {
+  const tomorrow = new Date(Date.now() + 86400_000).toISOString().slice(0, 10);
+  const [form, setForm] = useState({ followUpType: "performance_alert", scheduleDate: tomorrow, title: "", message: "", email: true });
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.title.trim() || !form.message.trim()) return toast.error("Title and message are required");
+    setSaving(true);
+    try {
+      await collegeAdminService.createFollowUp({
+        targetType: "student",
+        studentId,
+        followUpType: form.followUpType,
+        scheduleDate: new Date(form.scheduleDate).toISOString(),
+        title: form.title.trim(),
+        message: form.message.trim(),
+        channels: { inApp: true, email: form.email },
+        recipientRole: "student",
+      });
+      toast.success("Follow-up scheduled");
+      onClose();
+    } catch (err) {
+      toast.error(toApiError(err).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border p-4 space-y-3" style={{ backgroundColor: "color-mix(in srgb, var(--th-primary) 6%, transparent)", borderColor: "color-mix(in srgb, var(--th-primary) 35%, transparent)" }}>
+      <p className="flex items-center gap-1.5 text-xs font-bold" style={{ color: "var(--th-text-primary)" }}>
+        <CalendarClock size={13} className="text-blue-500" /> Schedule follow-up · {studentName}
+      </p>
+      <form onSubmit={submit} className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <label className="text-[10px] uppercase font-bold" style={{ color: "var(--th-text-faint)" }}>Type</label>
+            <select value={form.followUpType} onChange={(e) => setForm((f) => ({ ...f, followUpType: e.target.value }))}
+              className="w-full px-2 py-1.5 rounded-lg border text-xs" style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }}>
+              {FOLLOWUP_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] uppercase font-bold" style={{ color: "var(--th-text-faint)" }}>Send on</label>
+            <input type="date" value={form.scheduleDate} min={tomorrow} onChange={(e) => setForm((f) => ({ ...f, scheduleDate: e.target.value }))}
+              className="w-full px-2 py-1.5 rounded-lg border text-xs" style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }} />
+          </div>
+        </div>
+        <input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} placeholder="Title" maxLength={200}
+          className="w-full px-3 py-2 rounded-lg border text-xs" style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }} />
+        <textarea rows={3} value={form.message} onChange={(e) => setForm((f) => ({ ...f, message: e.target.value }))} placeholder="Message to the student" maxLength={1000}
+          className="w-full px-3 py-2 rounded-lg border text-xs resize-none" style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }} />
+        <label className="flex items-center gap-2 text-xs" style={{ color: "var(--th-text-secondary)" }}>
+          <input type="checkbox" checked={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.checked }))} /> Also email
+        </label>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
+          <Button type="submit" size="sm" loading={saving}>Schedule</Button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+const INTEL_FIELDS = [
+  ["aptitudeScore", "Aptitude"],
+  ["codingScore", "Coding"],
+  ["techScore", "Technical"],
+  ["communicationScore", "Communication"],
+  ["atsScore", "Resume / ATS"],
+] as const;
+
+function IntelPanel({ studentId, profile, onClose, onSaved }: { studentId: string; profile: Record<string, unknown> | null; onClose: () => void; onSaved: () => void }) {
+  const [scores, setScores] = useState<Record<string, string>>(
+    Object.fromEntries(INTEL_FIELDS.map(([k]) => [k, profile?.[k] != null ? String(profile[k]) : ""]))
+  );
+  const [gaps, setGaps] = useState(((profile?.skillGaps as string[]) ?? []).join(", "));
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const body: Record<string, unknown> = {};
+    for (const [k] of INTEL_FIELDS) {
+      if (scores[k] !== "") {
+        const n = Number(scores[k]);
+        if (Number.isNaN(n) || n < 0 || n > 100) return toast.error(`${k} must be 0–100`);
+        body[k] = n;
+      }
+    }
+    const gapList = gaps.split(",").map((s) => s.trim()).filter(Boolean);
+    if (gapList.length) body.skillGaps = gapList;
+    if (Object.keys(body).length === 0) return toast.error("Nothing to update");
+    setSaving(true);
+    try {
+      await collegeAdminService.updateStudentIntelligence(studentId, body);
+      toast.success("Student profile updated");
+      onSaved();
+    } catch (err) {
+      toast.error(toApiError(err).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border p-4 space-y-3" style={{ backgroundColor: "color-mix(in srgb, var(--th-primary) 6%, transparent)", borderColor: "color-mix(in srgb, var(--th-primary) 35%, transparent)" }}>
+      <p className="flex items-center gap-1.5 text-xs font-bold" style={{ color: "var(--th-text-primary)" }}>
+        <SlidersHorizontal size={13} className="text-blue-500" /> Manual score overrides
+      </p>
+      <p className="text-[10px]" style={{ color: "var(--th-text-faint)" }}>For offline assessments the platform can&apos;t see. Feeds the readiness score.</p>
+      <form onSubmit={submit} className="space-y-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {INTEL_FIELDS.map(([k, label]) => (
+            <div key={k} className="space-y-1">
+              <label className="text-[10px] uppercase font-bold" style={{ color: "var(--th-text-faint)" }}>{label}</label>
+              <input type="number" min={0} max={100} value={scores[k]} onChange={(e) => setScores((s) => ({ ...s, [k]: e.target.value }))}
+                className="w-full px-2 py-1.5 rounded-lg border text-xs" style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }} />
+            </div>
+          ))}
+        </div>
+        <div className="space-y-1">
+          <label className="text-[10px] uppercase font-bold" style={{ color: "var(--th-text-faint)" }}>Skill gaps (comma-separated)</label>
+          <input value={gaps} onChange={(e) => setGaps(e.target.value)} placeholder="DSA, System design, Communication"
+            className="w-full px-3 py-2 rounded-lg border text-xs" style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }} />
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
+          <Button type="submit" size="sm" loading={saving}>Save</Button>
+        </div>
+      </form>
     </div>
   );
 }

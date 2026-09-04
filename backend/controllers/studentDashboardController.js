@@ -9,6 +9,7 @@ const Notification = require('../models/NotificationModel.js');
 const NotificationService = require('../services/notificationService');
 const sendError = require('../utils/sendError.js');
 const logger = require('../services/loggerService.js');
+const { normalizeExternalMetrics, verifiedPlatformList } = require('../utils/codingProfiles.js');
 
 const getDashboard = async (req, res) => {
   const user = await User.findById(req.user.id).select('-password');
@@ -23,10 +24,10 @@ const getDashboard = async (req, res) => {
     Notification.countDocuments({ recipient: user._id, status: 'unread' })
   ]);
 
-  const codingProfiles = user.codingProfiles || {};
-  const verifiedPlatforms = Object.entries(codingProfiles)
-    .filter(([, platform]) => platform?.isVerified)
-    .map(([platform]) => platform);
+  // Connected platforms live on StudentProfile.externalMetrics — normalise to the
+  // { platform: { isVerified, username, stats } } shape the client expects.
+  const codingProfiles = normalizeExternalMetrics(profile?.externalMetrics);
+  const verifiedPlatforms = verifiedPlatformList(profile?.externalMetrics);
 
   return res.status(200).json({
     success: true,
@@ -45,7 +46,7 @@ const getDashboard = async (req, res) => {
 };
 
 const getProgress = async (req, res) => {
-  const profile = await StudentProfile.findOne({ user: req.user.id }).populate('user', 'name email role organization status isEmailVerified codingProfiles');
+  const profile = await StudentProfile.findOne({ user: req.user.id }).populate('user', 'name email role organization status isEmailVerified');
   if (!profile) {
     return res.status(404).json({ success: false, message: 'Student profile not found.' });
   }
@@ -57,8 +58,7 @@ const getProgress = async (req, res) => {
     Notification.countDocuments({ recipient: req.user.id, status: 'unread' })
   ]);
 
-  const codingProfiles = profile.user.codingProfiles || {};
-  const verifiedPlatforms = Object.values(codingProfiles).filter(platform => platform?.isVerified).length;
+  const verifiedPlatforms = verifiedPlatformList(profile.externalMetrics).length;
 
   return res.status(200).json({
     success: true,

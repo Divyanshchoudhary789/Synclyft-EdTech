@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Camera, Eye, AlertTriangle, X, ShieldAlert } from "lucide-react";
 import { useAudioProctor } from "@/components/hooks/useAudioProctor";
 import { useFaceProctor } from "@/components/hooks/useFaceProctor";
+import { useObjectProctor } from "@/components/hooks/useObjectProctor";
 import { ProctorSocket, type ProctorViolationType } from "@/lib/proctorSocket";
 
 interface ViolationToast {
@@ -20,32 +21,52 @@ interface Props {
 }
 
 const HUMAN: Record<ProctorViolationType, string> = {
-  face_absence: "Your face is not visible",
-  multiple_faces: "More than one person detected",
+  face_absence: "Your face isn't visible — center yourself in the camera",
+  multiple_faces: "More than one person detected in frame",
   gaze_deviation: "Looking away from the screen",
   tab_switch: "You switched away from this tab",
   window_minimize: "The interview window lost focus",
   paste_attempt: "Pasting is disabled during the interview",
   scripted_input: "Automated input detected",
-  multiple_voices: "Background voices detected",
+  multiple_voices: "Background voices detected — find a quiet, private space",
   mobile_detected: "A phone was detected",
 };
+
+// Give the candidate time to settle, and let the browser's camera/mic permission
+// prompts (which steal window focus) clear before anything is scored.
+const GRACE_MS = 12000;
+// A quick focus blip (permission dialog, notification) shouldn't count. Only a
+// blur that lasts this long is a real "left the window".
+const BLUR_GRACE_MS = 2200;
 
 export function ProctoringOverlay({ sessionId, candidateId, roundType, onTerminate }: Props) {
   const [toasts, setToasts] = useState<ViolationToast[]>([]);
   const [riskScore, setRiskScore] = useState(0);
   const [cameraOn, setCameraOn] = useState(false);
+  const [cameraDenied, setCameraDenied] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const proctorRef = useRef<ProctorSocket | null>(null);
+  const armedAt = useRef<number>(Date.now() + GRACE_MS);
+  const cameraReportedRef = useRef(false);
+
+  // Voice rounds: the candidate is *meant* to be talking to the AI and the
+  // interviewer's voice plays through the speakers — background-audio proctoring
+  // is meaningless here and would fire constantly.
+  const audioProctorEnabled = roundType === "aptitude" || roundType === "coding";
 
   const toast = useCallback((message: string) => {
     const id = Math.random().toString(36).slice(2);
-    setToasts((t) => [...t, { id, message }]);
+    setToasts((t) => [...t.slice(-3), { id, message }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6000);
   }, []);
 
   const report = useCallback(
     (type: ProctorViolationType, rawData?: Record<string, unknown>) => {
+      // Hard signals (a phone, a second person) are never acceptable — even in
+      // the warm-up window. Everything else is swallowed until the candidate has
+      // had a moment to settle and the browser permission prompts have cleared.
+      const isHardSignal = type === "mobile_detected" || type === "multiple_faces";
+      if (!isHardSignal && Date.now() < armedAt.current) return;
       proctorRef.current?.report(type, roundType, rawData);
       toast(HUMAN[type]);
     },
@@ -76,7 +97,7 @@ export function ProctoringOverlay({ sessionId, candidateId, roundType, onTermina
     let stream: MediaStream | null = null;
     let mounted = true;
     navigator.mediaDevices
-      ?.getUserMedia({ video: { width: 320, height: 240 } })
+      ?.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 } } })
       .then((s) => {
         if (!mounted) {
           s.getTracks().forEach((t) => t.stop());
@@ -85,10 +106,17 @@ export function ProctoringOverlay({ sessionId, candidateId, roundType, onTermina
         stream = s;
         if (videoRef.current) videoRef.current.srcObject = s;
         setCameraOn(true);
+        setCameraDenied(false);
       })
       .catch(() => {
         setCameraOn(false);
-        report("face_absence", { reason: "camera_denied" });
+        setCameraDenied(true);
+        // Report once — a denied camera is a real integrity gap, but hammering
+        // face_absence every render is not the way to record it.
+        if (!cameraReportedRef.current) {
+          cameraReportedRef.current = true;
+          setTimeout(() => report("face_absence", { reason: "camera_denied" }), GRACE_MS + 500);
+        }
       });
     return () => {
       mounted = false;
@@ -96,16 +124,35 @@ export function ProctoringOverlay({ sessionId, candidateId, roundType, onTermina
     };
   }, [report]);
 
-  // ── Face + audio detectors ──
+  // ── Face + object + audio detectors ──
   useFaceProctor(videoRef, cameraOn, report);
-  useAudioProctor(true, useCallback(() => report("multiple_voices"), [report]));
+  useObjectProctor(videoRef, cameraOn, report);
+  useAudioProctor(
+    audioProctorEnabled,
+    useCallback(() => report("multiple_voices"), [report])
+  );
 
   // ── DOM-level violations ──
   useEffect(() => {
+    let blurTimer: ReturnType<typeof setTimeout> | null = null;
+
     const onVisibility = () => {
-      if (document.visibilityState === "hidden") report("tab_switch");
+      if (document.visibilityState === "hidden") {
+        // Debounced inside report() via the grace window; the server also
+        // throttles per-type, so a genuine tab-away is one clean event.
+        report("tab_switch");
+      }
     };
-    const onBlur = () => report("window_minimize");
+    const onBlur = () => {
+      if (blurTimer) clearTimeout(blurTimer);
+      blurTimer = setTimeout(() => report("window_minimize"), BLUR_GRACE_MS);
+    };
+    const onFocus = () => {
+      if (blurTimer) {
+        clearTimeout(blurTimer);
+        blurTimer = null;
+      }
+    };
     const onPaste = (e: ClipboardEvent) => {
       // Allow paste inside the code editor only.
       const el = e.target as HTMLElement;
@@ -116,11 +163,14 @@ export function ProctoringOverlay({ sessionId, candidateId, roundType, onTermina
 
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("blur", onBlur);
+    window.addEventListener("focus", onFocus);
     document.addEventListener("paste", onPaste);
     document.addEventListener("contextmenu", onContextMenu);
     return () => {
+      if (blurTimer) clearTimeout(blurTimer);
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("blur", onBlur);
+      window.removeEventListener("focus", onFocus);
       document.removeEventListener("paste", onPaste);
       document.removeEventListener("contextmenu", onContextMenu);
     };
@@ -149,6 +199,12 @@ export function ProctoringOverlay({ sessionId, candidateId, roundType, onTermina
           </span>
         </div>
       </div>
+
+      {cameraDenied && (
+        <div className="fixed left-1/2 top-4 z-50 flex -translate-x-1/2 items-center gap-2 rounded-lg border border-amber-500/30 bg-[#3D2E10] px-4 py-2 text-xs text-[#F59E0B]">
+          <Camera size={14} /> Camera access is off — enable it in your browser for a clean proctoring record.
+        </div>
+      )}
 
       {/* Violation toasts */}
       <div className="fixed right-4 top-16 z-50 max-w-xs space-y-2" data-testid="proctoring-toasts">

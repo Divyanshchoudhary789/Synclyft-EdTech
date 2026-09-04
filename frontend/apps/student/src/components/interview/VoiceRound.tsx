@@ -162,8 +162,8 @@ export function VoiceRound({
         {status === "error" ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
             <AlertTriangle size={28} className="text-[#FF5C5C]" />
-            <p className="text-[#E8EAF0] text-sm">Couldn&apos;t run the {roundType === "hr" ? "HR" : "technical"} round</p>
-            <p className="text-[#6B7280] text-xs max-w-sm">{errorMsg}</p>
+            <p className="text-[var(--iv-text)] text-sm">Couldn&apos;t run the {roundType === "hr" ? "HR" : "technical"} round</p>
+            <p className="text-[var(--iv-text-faint)] text-xs max-w-sm">{errorMsg}</p>
             <div className="flex gap-2 mt-2">
               <button onClick={() => window.location.reload()} className="btn-secondary">Retry</button>
               <button onClick={finish} className="btn-primary">
@@ -174,29 +174,29 @@ export function VoiceRound({
         ) : (
           <div className="mx-auto max-w-5xl grid gap-4 lg:grid-cols-3">
             {/* Avatar */}
-            <div className="lg:col-span-2 relative rounded-2xl overflow-hidden border border-[#2A2F38] bg-[#12151A] aspect-video">
+            <div className="lg:col-span-2 relative rounded-2xl overflow-hidden border border-[var(--iv-border)] bg-[var(--iv-card)] aspect-video">
               <video ref={videoRef} autoPlay playsInline className="h-full w-full object-cover" />
               <audio ref={audioRef} autoPlay />
               {(status === "connecting" || status === "avatar-degraded") && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[#0B0D10]/85">
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[var(--iv-bg)]/85">
                   {status === "connecting" ? (
                     <>
                       <Loader2 size={22} className="animate-spin text-[#0062FF]" />
-                      <p className="text-xs text-[#9CA3AF]">Connecting to your interviewer…</p>
+                      <p className="text-xs text-[var(--iv-text-muted)]">Connecting to your interviewer…</p>
                     </>
                   ) : (
                     <>
-                      <div className="w-16 h-16 rounded-full bg-[#1B1F26] border border-[#2A2F38] flex items-center justify-center">
+                      <div className="w-16 h-16 rounded-full bg-[var(--iv-elevated)] border border-[var(--iv-border)] flex items-center justify-center">
                         <MessageSquare size={22} className="text-[#4D7CFF]" />
                       </div>
-                      <p className="text-xs text-[#9CA3AF]">Audio interview — the interviewer&apos;s voice will play</p>
+                      <p className="text-xs text-[var(--iv-text-muted)]">Audio interview — the interviewer&apos;s voice will play</p>
                     </>
                   )}
                 </div>
               )}
               <div className="absolute bottom-3 left-3 flex items-center gap-2 rounded-full bg-black/60 px-3 py-1.5 border border-white/10">
                 <span className={`h-2 w-2 rounded-full ${avatarSpeaking ? "bg-[#4D7CFF] animate-pulse" : "bg-[#3DDC84]"}`} />
-                <span className="text-[11px] font-medium text-[#C8CDD5]">
+                <span className="text-[11px] font-medium text-[var(--iv-text-secondary)]">
                   {avatarSpeaking ? "Interviewer speaking" : "Interviewer listening"}
                 </span>
               </div>
@@ -204,25 +204,25 @@ export function VoiceRound({
 
             {/* Candidate + status */}
             <div className="flex flex-col gap-4">
-              <div className="relative rounded-2xl overflow-hidden border border-[#2A2F38] bg-[#12151A] aspect-video">
+              <div className="relative rounded-2xl overflow-hidden border border-[var(--iv-border)] bg-[var(--iv-card)] aspect-video">
                 <video ref={camRef} autoPlay muted playsInline className="h-full w-full object-cover scale-x-[-1]" />
                 {!camOn && (
-                  <div className="absolute inset-0 flex items-center justify-center"><VideoOff size={20} className="text-[#4A5260]" /></div>
+                  <div className="absolute inset-0 flex items-center justify-center"><VideoOff size={20} className="text-[var(--iv-text-faintest)]" /></div>
                 )}
                 <div className="absolute bottom-2 left-2 flex items-center gap-1.5 rounded bg-black/60 px-2 py-1">
-                  {camOn ? <Video size={10} className="text-[#3DDC84]" /> : <VideoOff size={10} className="text-[#6B7280]" />}
-                  <span className="text-[10px] text-[#C8CDD5]">You</span>
+                  {camOn ? <Video size={10} className="text-[#3DDC84]" /> : <VideoOff size={10} className="text-[var(--iv-text-faint)]" />}
+                  <span className="text-[10px] text-[var(--iv-text-secondary)]">You</span>
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-[#2A2F38] bg-[#12151A] p-4 flex flex-col gap-3">
+              <div className="rounded-2xl border border-[var(--iv-border)] bg-[var(--iv-card)] p-4 flex flex-col gap-3">
                 <div className="flex items-center gap-2 text-xs">
                   <span className={`h-1.5 w-1.5 rounded-full ${status === "live" || status === "avatar-degraded" ? "bg-[#3DDC84]" : "bg-[#F59E0B]"}`} />
-                  <span className="text-[#9CA3AF]">{statusLabel}</span>
+                  <span className="text-[var(--iv-text-muted)]">{statusLabel}</span>
                 </div>
                 <div className="flex items-center gap-2 text-xs">
                   {micOn ? <Mic size={13} className="text-[#3DDC84]" /> : <MicOff size={13} className="text-[#FF5C5C]" />}
-                  <span className="text-[#9CA3AF]">{micOn ? "Microphone live — speak naturally" : "Microphone off"}</span>
+                  <span className="text-[var(--iv-text-muted)]">{micOn ? "Microphone live — speak naturally" : "Microphone off"}</span>
                 </div>
                 {micOn && (
                   <div className="flex h-6 items-center gap-1">
@@ -237,15 +237,15 @@ export function VoiceRound({
             </div>
 
             {/* Question + transcript */}
-            <div className="lg:col-span-3 rounded-2xl border border-[#2A2F38] bg-[#12151A] p-4 sm:p-5 space-y-2">
-              <p className="label-caption text-[#4A5260]">Current question</p>
-              <p className="text-[#E8EAF0] text-sm sm:text-base leading-relaxed min-h-[1.5rem]">
+            <div className="lg:col-span-3 rounded-2xl border border-[var(--iv-border)] bg-[var(--iv-card)] p-4 sm:p-5 space-y-2">
+              <p className="label-caption text-[var(--iv-text-faintest)]">Current question</p>
+              <p className="text-[var(--iv-text)] text-sm sm:text-base leading-relaxed min-h-[1.5rem]">
                 {question || (status === "connecting" ? "…" : "Waiting for the interviewer…")}
               </p>
               {interim && (
-                <p className="text-xs text-[#6B7280] italic border-t border-[#2A2F38] pt-2">“{interim}”</p>
+                <p className="text-xs text-[var(--iv-text-faint)] italic border-t border-[var(--iv-border)] pt-2">“{interim}”</p>
               )}
-              <p className="text-[11px] text-[#4A5260] pt-1">
+              <p className="text-[11px] text-[var(--iv-text-faintest)] pt-1">
                 {roundType === "hr"
                   ? "Answer out loud using the STAR method (Situation, Task, Action, Result)."
                   : "Talk through your design — data model, trade-offs, scaling. The coding challenge follows."}

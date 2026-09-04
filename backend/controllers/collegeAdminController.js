@@ -28,7 +28,10 @@ const sendError = require('../utils/sendError.js');
 
 const buildPagination = (query) => {
   const page = Math.max(parseInt(query.page, 10) || 1, 1);
-  const limit = Math.min(Math.max(parseInt(query.limit, 10) || 10, 1), 100);
+  // Officer roster / seat-allocation / batch views load the whole cohort
+  // client-side for filtering and cohort-wide KPIs, so allow a large page.
+  // Kept in sync with reportSchemas.paginationSchema (max 500).
+  const limit = Math.min(Math.max(parseInt(query.limit, 10) || 10, 1), 500);
   return { page, limit, skip: (page - 1) * limit };
 };
 
@@ -779,7 +782,7 @@ const allocateSeat = async (req, res) => {
     type: 'seat_allocated',
     title: 'Seat Allocated',
     message: `Your seat has been allocated by ${user.organization}.`,
-    actionUrl: '/student/dashboard',
+    actionUrl: '/dashboard',
     actionText: 'View dashboard',
     priority: 'high',
     metadata: { notes }
@@ -827,7 +830,7 @@ const releaseSeat = async (req, res) => {
     type: 'seat_released',
     title: 'Seat Released',
     message: `Your seat has been released by ${user.organization}.`,
-    actionUrl: '/student/dashboard',
+    actionUrl: '/dashboard',
     actionText: 'View dashboard',
     priority: 'high',
     metadata: { reason }
@@ -925,7 +928,7 @@ const assignCampaignToBatches = async (req, res) => {
       title: `New placement campaign: ${campaign.title}`,
       message: `A new placement campaign has been assigned to your batch by ${context.organization.organizationName}.`,
       description: campaign.description,
-      actionUrl: `/student/campaigns/${campaign._id}`,
+      actionUrl: `/campaigns/${campaign._id}`,
       actionText: 'View campaign',
       relatedEntity: { type: 'campaign', entityId: campaign._id },
       priority: 'high',
@@ -1029,7 +1032,7 @@ const revokeCampaignAssignment = async (req, res) => {
       title: `Campaign revoked: ${campaign.title}`,
       message: `The campaign ${campaign.title} is no longer assigned to your batch.`,
       description: campaign.description,
-      actionUrl: '/student/campaigns',
+      actionUrl: '/campaigns',
       actionText: 'View campaigns',
       relatedEntity: { type: 'campaign', entityId: campaign._id },
       priority: 'normal',
@@ -1760,6 +1763,24 @@ const getStudentsWhoMissedAptitude = async (req, res) => {
         .slice(0, 5)
         .map(([skill]) => skill);
 
+      // Real cohort counts for the audience sizing below.
+      const orgStudentIds = await User.find({ role: 'student', organization: context.user.organization }).select('_id').lean();
+      const orgStudentObjIds = orgStudentIds.map(u => u._id);
+      const [belowSixtyFive, totalWithProfile] = await Promise.all([
+        StudentProfile.countDocuments({ user: { $in: orgStudentObjIds }, placementReadinessScore: { $lt: 65 } }),
+        StudentProfile.countDocuments({ user: { $in: orgStudentObjIds } }),
+      ]);
+      // Count students who actually have a matching weakness recorded.
+      const skillCount = (names) => {
+        const set = new Set();
+        insights.forEach(ins => {
+          const hits = [...(ins.weaknesses || []), ...(ins.skillGapsVsJd || [])]
+            .some(w => names.some(n => String(w).toLowerCase().includes(n)));
+          if (hits) set.add(String(ins.student));
+        });
+        return set.size;
+      };
+
       const recommendations = await WorkshopRecommendation.insertMany([
         {
           organization: context.user._id,
@@ -1796,11 +1817,12 @@ const getStudentsWhoMissedAptitude = async (req, res) => {
           priority: 'high',
           estimatedImpact: 'high',
           reason: 'Low coding scores and high risk scores indicate need for technical skill development.',
-          skillGaps: ['Data Structures', 'Algorithms', 'System Design'].map(skill => ({
-            skill,
-            studentCount: Math.floor(Math.random() * 50) + 20
-          })),
-          affectedStudentCount: 100,
+          skillGaps: [
+            { skill: 'Data Structures', studentCount: skillCount(['data structure', 'array', 'linked list', 'tree', 'graph']) },
+            { skill: 'Algorithms', studentCount: skillCount(['algorithm', 'dynamic programming', 'sorting', 'complexity']) },
+            { skill: 'System Design', studentCount: skillCount(['system design', 'scalab', 'architecture']) },
+          ],
+          affectedStudentCount: belowSixtyFive,
           metadata: { generatedBy: 'ai', confidenceScore: 90 }
         },
         {
@@ -1817,11 +1839,12 @@ const getStudentsWhoMissedAptitude = async (req, res) => {
           priority: 'medium',
           estimatedImpact: 'medium',
           reason: 'Communication and behavioral skills are critical for placement success.',
-          skillGaps: ['Communication', 'Interview Skills', 'Resume Building'].map(skill => ({
-            skill,
-            studentCount: Math.floor(Math.random() * 40) + 15
-          })),
-          affectedStudentCount: 80,
+          skillGaps: [
+            { skill: 'Communication', studentCount: skillCount(['communication', 'verbal', 'articulat']) },
+            { skill: 'Interview Skills', studentCount: skillCount(['interview', 'behavioral', 'hr round', 'star method']) },
+            { skill: 'Resume Building', studentCount: skillCount(['resume', 'cv', 'portfolio']) },
+          ],
+          affectedStudentCount: totalWithProfile,
           metadata: { generatedBy: 'ai', confidenceScore: 75 }
         }
       ]);
@@ -2442,7 +2465,7 @@ const generateUniversitySummary = (readinessDist, sessionMetrics) => {
         title,
         message,
         description: description || '',
-        actionUrl: actionUrl || '/student/dashboard',
+        actionUrl: actionUrl || '/dashboard',
         actionText: actionText || 'View Dashboard',
         relatedEntity: { type: 'custom_bulk', entityId: null },
         priority: priority || 'normal'
@@ -2570,7 +2593,7 @@ const generateUniversitySummary = (readinessDist, sessionMetrics) => {
           title: `New placement campaign: ${campaign.title}`,
           message: `A new placement campaign has been assigned to you by ${context.organization.organizationName}.`,
           description: campaign.description,
-          actionUrl: `/student/campaigns/${campaign._id}`,
+          actionUrl: `/campaigns/${campaign._id}`,
           actionText: 'View campaign',
           relatedEntity: { type: 'campaign', entityId: campaign._id },
           priority: 'high'

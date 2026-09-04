@@ -13,7 +13,7 @@ import { SkeletonCard } from "@synclyft/ui/components/SkeletonBlock";
 import { getGradeColor, getGradeBand } from "@synclyft/lib/utils";
 import { interviewService, analyticsService } from "@synclyft/lib/api/services";
 import { toApiError } from "@synclyft/lib/api";
-import { CheckCircle2, XCircle, AlertTriangle, ArrowRight, BookOpen, ShieldAlert } from "lucide-react";
+import { CheckCircle2, XCircle, AlertTriangle, ArrowRight, BookOpen, ShieldAlert, Check } from "lucide-react";
 
 interface RoundAnalytic {
   roundType: string;
@@ -31,6 +31,7 @@ interface InsightsData {
     roundAnalytics?: RoundAnalytic[];
   };
   session: { targetRole: string; status: string };
+  report?: ReportCard | null;
 }
 interface ReportCard {
   narrativeSummary?: string;
@@ -77,6 +78,9 @@ function InterviewReportInner() {
 
       const data = (await analyticsService.sessionInsights(sessionId)) as InsightsData;
       setInsights(data);
+      // Prefer the written report from the just-finalised summary; otherwise use
+      // the one persisted with the session (so past reports look identical).
+      if (data.report) setReport((prev) => prev ?? data.report ?? null);
       setPhase("ready");
     } catch (err) {
       setErrorMsg(toApiError(err).message);
@@ -202,7 +206,7 @@ function InterviewReportInner() {
                     <CheckCircle2 size={15} className="text-emerald-500" /> Strengths
                   </h3>
                   <ul className="space-y-2">
-                    {report.strengths.map((s, i) => <li key={i} className="text-xs flex gap-2" style={{ color: "var(--th-text-secondary)" }}><span className="text-emerald-500">✓</span>{s}</li>)}
+                    {report.strengths.map((s, i) => <li key={i} className="text-xs flex gap-2" style={{ color: "var(--th-text-secondary)" }}><Check size={13} className="mt-0.5 shrink-0 text-emerald-500" />{s}</li>)}
                   </ul>
                 </div>
               )}
@@ -212,7 +216,7 @@ function InterviewReportInner() {
                     <XCircle size={15} className="text-rose-500" /> Areas to improve
                   </h3>
                   <ul className="space-y-2">
-                    {report.weaknesses.map((s, i) => <li key={i} className="text-xs flex gap-2" style={{ color: "var(--th-text-secondary)" }}><span className="text-rose-500">!</span>{s}</li>)}
+                    {report.weaknesses.map((s, i) => <li key={i} className="text-xs flex gap-2" style={{ color: "var(--th-text-secondary)" }}><AlertTriangle size={12} className="mt-0.5 shrink-0 text-rose-500" />{s}</li>)}
                   </ul>
                 </div>
               )}

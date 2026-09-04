@@ -1,121 +1,215 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
-import { useState, useEffect, useRef } from "react";
-import { motion, AnimatePresence, useScroll, useTransform } from "framer-motion";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowRight,
   ChevronRight,
+  ChevronDown,
   Brain,
   Code2,
+  Terminal,
   Mic2,
+  ScanFace,
+  Radar as RadarIcon,
+  Sparkles,
+  FileText,
   BarChart3,
-  Shield,
-  Users,
-  Star,
-  CheckCircle,
-  Play,
-  Target,
-  TrendingUp,
-  ChevronDown,
+  Check,
+  GraduationCap,
+  Building2,
+  Rocket,
+  ClipboardCheck,
+  LineChart as LineChartIcon,
+  MonitorPlay,
 } from "lucide-react";
-import { Logo } from "@synclyft/ui/components/Logo";
-import { AdaptivePulse } from "@synclyft/ui/components/AdaptivePulse";
+import {
+  ResponsiveContainer,
+  RadarChart,
+  Radar,
+  PolarGrid,
+  PolarAngleAxis,
+  AreaChart,
+  Area,
+  XAxis,
+  Tooltip,
+} from "recharts";
 import { CountUp } from "@synclyft/ui/components/CountUp";
-import { Badge } from "@synclyft/ui/components/Badge";
-import Firstnav from "@/components/layout/Firstnav";
-import { useTheme } from "@synclyft/lib/theme";
 import { cn } from "@synclyft/lib/utils";
 import { subscriptionService } from "@synclyft/lib/api/services";
+import Firstnav from "@/components/layout/Firstnav";
 import Footer from "@/components/layout/Footer";
+
+/* ────────────────────────────────────────────────────────────────────────────
+   Reveal — IntersectionObserver + CSS transition (+ timer fallback). Never
+   freezes at opacity:0 the way framer mount animations can on a back-nav.
+   ──────────────────────────────────────────────────────────────────────────── */
+function Reveal({ children, delay = 0, className }: { children: ReactNode; delay?: number; className?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      ([e]) => {
+        if (e.isIntersecting) {
+          setShown(true);
+          io.disconnect();
+        }
+      },
+      { rootMargin: "0px 0px -8% 0px", threshold: 0.12 },
+    );
+    io.observe(el);
+    const t = setTimeout(() => setShown(true), 1400);
+    return () => {
+      io.disconnect();
+      clearTimeout(t);
+    };
+  }, []);
+  return (
+    <div
+      ref={ref}
+      className={className}
+      style={{
+        opacity: shown ? 1 : 0,
+        transform: shown ? "none" : "translateY(18px)",
+        transition: `opacity 520ms ease ${delay}ms, transform 620ms cubic-bezier(0.22,1,0.36,1) ${delay}ms`,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/* ── constants ──────────────────────────────────────────────────────────── */
 
 const HERO_WORDS = ["Aptitude", "Coding", "Technical", "HR"];
 
-const floatingOrbs = [
-  { size: 500, x: "-10%", y: "-20%", color: "rgba(0,98,255,0.06)", delay: 0 },
-  { size: 380, x: "70%", y: "10%", color: "rgba(0,145,255,0.05)", delay: 0.5 },
-  { size: 300, x: "30%", y: "60%", color: "rgba(0,75,230,0.04)", delay: 1 },
+const CAPABILITY_STATS: { value: number | null; display?: string; suffix?: string; label: string; sub: string }[] = [
+  { value: 4, label: "Adaptive rounds", sub: "Aptitude, Coding, Technical and HR — one complete mock in a single sitting" },
+  { value: 3, label: "Free mock interviews", sub: "Plus 2 AI evaluations and 1 PDF report on sign-up — no card required" },
+  { value: 6, label: "Readiness bands", sub: "Every attempt places you from “Exceptional” down to “Needs work”" },
+  { value: 100, suffix: "%", label: "AI-scored & proctored", sub: "Camera, audio and on-screen checks on every session you run" },
 ];
 
-const features = [
+const ROUNDS = [
   {
+    key: "aptitude",
     icon: Brain,
-    title: "Adaptive Intelligence",
-    desc: "Questions calibrate to your level in real-time harder when you excel targeted when you struggle every session is unique.",
-    tag: "AI Engine",
+    name: "Aptitude",
+    tag: "Round 1",
+    blurb:
+      "Quantitative, logical and verbal reasoning under real time pressure. Pick the topics you want, get a question palette, and attempt questions in any order.",
+    points: [
+      "Topic-wise question selection",
+      "Palette to jump between questions",
+      "Auto-scored the moment you submit",
+      "Answer review once the timer ends",
+    ],
   },
   {
+    key: "coding",
     icon: Code2,
-    title: "Monaco Coding Environment",
-    desc: "Full IDE experience with syntax highlighting, auto-complete and real test-case execution against a sandboxed judge.",
-    tag: "Coding Round",
+    name: "Coding",
+    tag: "Round 2",
+    blurb:
+      "A LeetCode-style workspace — problem statement, editor and test cases in resizable panels. Run against public samples, then submit to a real sandboxed judge.",
+    points: [
+      "Monaco editor in your language",
+      "Run public test cases before you submit",
+      "Real sandbox execution via Judge0",
+      "3 easy · 5 medium · 2 hard problems",
+    ],
   },
   {
+    key: "technical",
+    icon: Terminal,
+    name: "Technical",
+    tag: "Round 3",
+    blurb:
+      "A voice AI interviewer digs into your projects and CS fundamentals, then you solve a coding problem live — discussion and hands-on in the same round.",
+    points: [
+      "Conversational voice persona",
+      "Questions grounded in your resume",
+      "Live coding after the discussion",
+      "Communication and correctness both scored",
+    ],
+  },
+  {
+    key: "hr",
     icon: Mic2,
-    title: "Voice-First HR Round",
-    desc: "AI interviewer with natural conversation flow. Waveform visualization, silence detection and behavioral scoring.",
-    tag: "HR Round",
+    name: "HR",
+    tag: "Round 4",
+    blurb:
+      "A natural back-and-forth voice conversation with an AI interviewer — behavioural questions, real follow-ups, and scoring on communication, structure and clarity.",
+    points: [
+      "Real-time voice with genuine follow-ups",
+      "Behavioural and situational questions",
+      "Scored on structure and clarity",
+      "Full transcript saved to your report",
+    ],
+  },
+] as const;
+
+const STEPS = [
+  {
+    icon: Rocket,
+    title: "Create a free account",
+    body: "Sign up with your email. Your trial includes 3 mock interviews, 2 AI evaluations and 1 PDF report — nothing to pay.",
   },
   {
-    icon: Shield,
-    title: "Intelligent Proctoring",
-    desc: "Multi-signal proctoring that flags anomalies without false positives respecting candidates while ensuring integrity.",
-    tag: "Proctoring",
+    icon: ClipboardCheck,
+    title: "Set up your mock",
+    body: "Choose the rounds, your target role and coding language. Upload your resume so the Technical round can reference it.",
   },
   {
-    icon: BarChart3,
-    title: "Readiness Analytics",
-    desc: "Radar charts, score trends, percentile bands and AI narrative reports not a scorecard an intelligence briefing.",
-    tag: "Analytics",
+    icon: MonitorPlay,
+    title: "Sit the interview, proctored",
+    body: "Take each round back to back. Camera, audio and object checks run quietly in the background — calibrated not to flag honest candidates.",
   },
   {
-    icon: Users,
-    title: "Placement Officer Portal",
-    desc: "Batch dashboards, student drill-downs, AI report generation and natural language queries across your cohort.",
-    tag: "Officer Portal",
+    icon: LineChartIcon,
+    title: "Get your readiness report",
+    body: "A score, a competency radar, a trend, an AI narrative and a week-by-week study plan built from your weakest areas.",
   },
 ];
 
-const testimonials = [
+const REPORT_ITEMS = [
+  { icon: BarChart3, title: "Readiness score & band", body: "One number, weighted across every round you took, mapped to a six-level band and a percentile." },
+  { icon: RadarIcon, title: "Competency radar", body: "Communication, problem-solving, technical depth and coding — where you're strong and where you're thin." },
+  { icon: Sparkles, title: "AI narrative report", body: "A written breakdown of what went well, what didn't, and the specific things to fix before your next attempt." },
+  { icon: FileText, title: "Week-by-week study plan", body: "Topics, sub-topics, hours and resources — generated from your weakest areas, tracked as you complete it." },
+];
+
+const FAQS = [
   {
-    name: "Priya Sharma",
-    role: "SDE-2, Google",
-    college: "IIT Delhi",
-    content: "The technical round felt more realistic than actual Google interviews. The system design questions and adaptive follow-ups were genuinely challenging.",
-    score: 94,
-    grade: "A+",
+    q: "What exactly is a Synclyft mock interview?",
+    a: "One sitting of up to four adaptive rounds — Aptitude, Coding, Technical and HR. The Technical and HR rounds use a voice AI interviewer; the Coding round runs real code against a sandboxed judge. Everything is proctored and scored automatically.",
   },
   {
-    name: "Dr. Rajesh Kumar",
-    role: "Placement Officer",
-    college: "NIT Trichy",
-    content: "The officer portal transformed how we track placement readiness. The AI-generated batch reports save us 20+ hours of manual assessment each semester.",
-    score: null,
-    grade: null,
+    q: "Is it really free to start?",
+    a: "Yes. Every new account gets 3 mock interviews, 2 AI evaluations and 1 PDF report on the trial — no card required. After that you can subscribe, or your college can allocate you a seat at no personal cost.",
   },
   {
-    name: "Aryan Kapoor",
-    role: "ML Engineer, Flipkart",
-    college: "BITS Pilani",
-    content: "The resume ATS analyzer identified three critical gaps I'd missed. After applying the suggestions, I went from 3 callbacks to 11 in two weeks.",
-    score: 88,
-    grade: "A",
+    q: "How does the adaptive coding round work?",
+    a: "You get a fixed mix of 3 easy, 5 medium and 2 hard problems. You run your solution against public sample cases in the editor, then submit for full evaluation on a real sandbox. Partial credit is given for test cases passed.",
+  },
+  {
+    q: "What does the proctoring actually check?",
+    a: "Face presence, multiple people, phone or second-screen detection, plus tab switching and paste attempts. The engine is calibrated to avoid false positives — a quick look away won't flag you.",
+  },
+  {
+    q: "My college uses Synclyft. Do I still need my own plan?",
+    a: "No. If your placement cell has allocated you a seat, you get full access to every round for free, and your results feed straight into their dashboards.",
+  },
+  {
+    q: "What happens to my resume and interview recordings?",
+    a: "Your resume is used to tailor the Technical round and your ATS analysis. Interview transcripts and scores are attached to your own report and shared with your college only if you're on their seat.",
   },
 ];
 
-// ── Pricing: rendered from the live catalogue (/subscriptions/plans/public + /plans/org) ──
-interface PlanCard {
-  key: string;
-  name: string;
-  price: string;
-  period: string;
-  desc: string;
-  features: string[];
-  cta: string;
-  href: string;
-  highlighted: boolean;
-}
+/* ── pricing (live catalogue) ──────────────────────────────────────────── */
 
 type RawPlan = {
   name?: string;
@@ -127,29 +221,28 @@ type RawPlan = {
 };
 
 const inr = (n: number) => `₹${n.toLocaleString("en-IN")}`;
-const fmtLimit = (n?: number) => (n === undefined ? "" : n < 0 ? "Unlimited" : `${n}`);
 
-const STUDENT_PLAN_META: Record<string, { desc: string; highlighted?: boolean }> = {
-  STUDENT_BASIC: { desc: "For individual candidates preparing for campus or off-campus drives." },
+const STUDENT_META: Record<string, { desc: string; highlighted?: boolean }> = {
+  STUDENT_BASIC: { desc: "For candidates who want regular, structured practice." },
   STUDENT_PRO: { desc: "For serious candidates targeting top-tier companies.", highlighted: true },
-  STUDENT_PREMIUM: { desc: "Unlimited practice for candidates going all-in on placements." },
+  STUDENT_PREMIUM: { desc: "Unlimited practice for an all-in placement season." },
 };
-const ORG_PLAN_META: Record<string, { desc: string; highlighted?: boolean }> = {
-  BASIC: { desc: "For placement cells and coaching institutes starting out." },
-  PRO: { desc: "For established placement teams running batch-wide drives.", highlighted: true },
-  ENTERPRISE: { desc: "For large universities needing custom integrations and scale." },
+const ORG_META: Record<string, { desc: string; highlighted?: boolean }> = {
+  BASIC: { desc: "For placement cells piloting data-driven prep." },
+  PRO: { desc: "For teams running drives across the whole cohort.", highlighted: true },
+  ENTERPRISE: { desc: "For universities that need scale and custom branding." },
 };
 
 function studentFeatures(p: RawPlan): string[] {
   const mi = p.limits?.mockInterviewsPerMonth;
   const rp = p.limits?.studentReportsPerMonth;
   const out: string[] = [];
-  out.push(mi !== undefined && mi < 0 ? "Unlimited mock interviews" : `${fmtLimit(mi)} mock interviews / month`);
+  out.push(mi !== undefined && mi < 0 ? "Unlimited mock interviews" : `${mi ?? 0} mock interviews / month`);
   out.push("Aptitude, Coding, Technical & HR rounds");
   if (p.features?.aiEvaluation) out.push("AI evaluation & round-by-round feedback");
-  out.push(rp !== undefined && rp < 0 ? "Unlimited PDF report exports" : `${fmtLimit(rp)} PDF report exports / month`);
+  out.push(rp !== undefined && rp < 0 ? "Unlimited PDF report exports" : `${rp ?? 0} PDF report exports / month`);
   out.push("Resume upload & ATS analysis");
-  if (p.features?.proctoring) out.push("AI proctoring on mock interviews");
+  if (p.features?.proctoring) out.push("AI proctoring on every mock");
   if (p.features?.placementIntelligence) out.push("Placement-readiness intelligence");
   if (p.features?.advancedAnalytics) out.push("Advanced analytics & percentile");
   return out;
@@ -162,14 +255,30 @@ function orgFeatures(p: RawPlan): string[] {
   if (p.features?.placementIntelligence) out.push("Placement intelligence & AI insights");
   if (p.features?.batchManagement) out.push("Batch management & campaigns");
   if (p.features?.proctoring) out.push("Proctored assessments");
-  if (p.features?.advancedAnalytics) out.push("Advanced analytics");
-  if (p.features?.apiAccess) out.push("API access");
   if (p.features?.customBranding) out.push("Custom branding");
   return out;
 }
 
-function buildStudentCards(map: Record<string, RawPlan>, billing: "monthly" | "yearly"): PlanCard[] {
-  const order = ["STUDENT_BASIC", "STUDENT_PRO", "STUDENT_PREMIUM"];
+interface PlanCard {
+  key: string;
+  name: string;
+  price: string;
+  period: string;
+  desc: string;
+  cta: string;
+  href: string;
+  highlighted: boolean;
+  features: string[];
+}
+
+function buildCards(
+  map: Record<string, RawPlan>,
+  billing: "monthly" | "yearly",
+  kind: "student" | "org",
+): PlanCard[] {
+  const order = kind === "student" ? ["STUDENT_BASIC", "STUDENT_PRO", "STUDENT_PREMIUM"] : ["BASIC", "PRO", "ENTERPRISE"];
+  const meta = kind === "student" ? STUDENT_META : ORG_META;
+  const officerUrl = process.env.NEXT_PUBLIC_OFFICER_URL;
   return Object.entries(map)
     .sort(([a], [b]) => order.indexOf(a) - order.indexOf(b))
     .map(([key, p]) => {
@@ -180,651 +289,666 @@ function buildStudentCards(map: Record<string, RawPlan>, billing: "monthly" | "y
         name: (p.name || key).replace(/^Student /, ""),
         price: billing === "monthly" ? inr(monthly) : inr(yearly),
         period: billing === "monthly" ? "/ month" : "/ year",
-        desc: STUDENT_PLAN_META[key]?.desc ?? "",
-        features: studentFeatures(p),
-        cta: "Start free trial",
-        href: "/register",
-        highlighted: Boolean(STUDENT_PLAN_META[key]?.highlighted),
-      };
-    });
-}
-function buildOrgCards(map: Record<string, RawPlan>, billing: "monthly" | "yearly"): PlanCard[] {
-  const order = ["BASIC", "PRO", "ENTERPRISE"];
-  return Object.entries(map)
-    .sort(([a], [b]) => order.indexOf(a) - order.indexOf(b))
-    .map(([key, p]) => {
-      const monthly = p.monthlyPrice ?? 0;
-      const yearly = p.yearlyPrice ?? monthly * 12;
-      return {
-        key,
-        name: p.name || key,
-        price: billing === "monthly" ? inr(monthly) : inr(yearly),
-        period: billing === "monthly" ? "/ month" : "/ year",
-        desc: ORG_PLAN_META[key]?.desc ?? "",
-        features: orgFeatures(p),
-        cta: key === "ENTERPRISE" ? "Contact sales" : "Request demo",
-        href: process.env.NEXT_PUBLIC_OFFICER_URL ? `${process.env.NEXT_PUBLIC_OFFICER_URL}/register` : "/register",
-        highlighted: Boolean(ORG_PLAN_META[key]?.highlighted),
+        desc: meta[key]?.desc ?? "",
+        cta: kind === "student" ? "Start free" : key === "ENTERPRISE" ? "Contact sales" : "Request a demo",
+        href: kind === "student" ? "/register" : officerUrl ? `${officerUrl}/register` : "/register",
+        highlighted: Boolean(meta[key]?.highlighted),
+        features: kind === "student" ? studentFeatures(p) : orgFeatures(p),
       };
     });
 }
 
-const stats = [
-  { value: 94, suffix: "%", label: "Placement rate improvement" },
-  { value: 12, suffix: "K+", label: "Students assessed" },
-  { value: 340, suffix: "+", label: "Partner companies" },
-  { value: 4.9, suffix: "/5", label: "Average rating", decimals: 1 },
+/* ── hero preview (illustrative) ───────────────────────────────────────── */
+
+const RADAR_DATA = [
+  { k: "Communication", v: 78 },
+  { k: "Problem solving", v: 64 },
+  { k: "Technical", v: 71 },
+  { k: "Coding", v: 58 },
+  { k: "Aptitude", v: 82 },
+];
+const TREND = [
+  { m: "Mock 1", v: 48 },
+  { m: "Mock 2", v: 55 },
+  { m: "Mock 3", v: 61 },
+  { m: "Mock 4", v: 68 },
+  { m: "Mock 5", v: 72 },
 ];
 
-// Motion Animation Configs
-const heroContainer = {
-  hidden: { opacity: 0 },
-  show: {
-    opacity: 1,
-    transition: { staggerChildren: 0.12, delayChildren: 0.1 },
-  },
-} as const;
-
-const heroItem = {
-  hidden: { opacity: 0, y: 28, filter: "blur(4px)" },
-  show: {
-    opacity: 1,
-    y: 0,
-    filter: "blur(0px)",
-    transition: { type: "spring" as const, stiffness: 90, damping: 18 },
-  },
-} as const;
-
-const fadeUp = {
-  hidden: { opacity: 0, y: 30 },
-  show: { opacity: 1, y: 0, transition: { type: "spring" as const, stiffness: 80, damping: 14 } },
-} as const;
-
-const FAQS = [
-  {
-    question: "What is Synclyft AI and how does it work?",
-    answer: "Synclyft AI is an end-to-end interview prep platform designed for campus placements. It offers four adaptive mock interview rounds—Aptitude, Coding, Technical, and HR—leveraging voice AI, Monaco IDE playground, proctoring, and comprehensive readiness analytics."
-  },
-  {
-    question: "How does the adaptive coding round calibrate difficulty?",
-    answer: "Our engine monitors your submissions in real-time. If you solve test cases quickly and correctly, the platform automatically escalates difficulty and adds challenging follow-up constraints. If you struggle, it simplifies target scenarios to pinpoint and patch your core conceptual gaps."
-  },
-  {
-    question: "Can college placement offices use the platform?",
-    answer: "Yes, Synclyft features a comprehensive Placement Officer Portal. Admins and officers can view cohort performance dashboards, perform academic audits, generate batch-wide AI readiness reports, and query students' statistics in natural language."
-  },
-  {
-    question: "What proctoring features are included?",
-    answer: "Our system implements multi-signal, non-intrusive proctoring (tab switching tracking, audio-visual anomaly detection) that flags integrity violations in real-time without disrupting the candidate's flow, preserving privacy while ensuring assessment validity."
-  },
-  {
-    question: "How does the AI HR round evaluate candidates?",
-    answer: "The HR module features conversational voice AI with live waveform feedback. It listens to candidate responses and analyzes communication structure, language clarity, keyword usage, behavioral intent, and sentiment analytics."
-  }
-];
-
-export default function LandingPage() {
-  const [activePortal, setActivePortal] = useState<"student" | "officer">("student");
-  const [pricingTab, setPricingTab] = useState<"student" | "org">("student");
-  const [billing, setBilling] = useState<"monthly" | "yearly">("monthly");
-  const [studentCatalog, setStudentCatalog] = useState<Record<string, RawPlan> | null>(null);
-  const [orgCatalog, setOrgCatalog] = useState<Record<string, RawPlan> | null>(null);
-  const [activeFaqIdx, setActiveFaqIdx] = useState<number | null>(null);
-  const [statsVisible, setStatsVisible] = useState(false);
-  const [heroWordIdx, setHeroWordIdx] = useState(0);
-  const heroRef = useRef<HTMLElement>(null);
-  const { scrollYProgress } = useScroll({ target: heroRef, offset: ["start start", "end start"] });
-  const heroParallaxY = useTransform(scrollYProgress, [0, 1], ["0%", "30%"]);
-  const heroOpacity = useTransform(scrollYProgress, [0, 0.7], [1, 0]);
-  const { theme } = useTheme();
-  const isDark = theme === "dark";
-
-  useEffect(() => {
-    const timer = setTimeout(() => setStatsVisible(true), 800);
-    return () => clearTimeout(timer);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    subscriptionService.plansPublic().then((m) => { if (!cancelled) setStudentCatalog(m as Record<string, RawPlan>); }).catch(() => {});
-    subscriptionService.orgPlans().then((m) => { if (!cancelled) setOrgCatalog(m as Record<string, RawPlan>); }).catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setHeroWordIdx((i) => (i + 1) % HERO_WORDS.length);
-    }, 2200);
-    return () => clearInterval(interval);
-  }, []);
-
+function HeroPreview() {
   return (
-    <div className="min-h-screen relative" style={{ backgroundColor: "var(--th-bg)", color: "var(--th-text-primary)", fontFamily: "var(--font-inter), sans-serif" }}>
-
-      {/* ── Layered mesh-gradient background placed globally ── */}
-      <div className="absolute top-0 left-0 right-0 h-[100vh] pointer-events-none overflow-hidden -z-10" aria-hidden>
-        <div className="absolute inset-0" style={{ background: "var(--th-hero-grad)" }} />
-        {/* Animated floating orbs */}
-        {floatingOrbs.map((orb, i) => (
-          <motion.div
-            key={i}
-            className="absolute rounded-full"
-            style={{
-              width: orb.size,
-              height: orb.size,
-              left: orb.x,
-              top: orb.y,
-              background: `radial-gradient(circle, ${orb.color}, transparent 70%)`,
-            }}
-            animate={{
-              scale: [1, 1.15, 1],
-              x: [0, 20, -10, 0],
-              y: [0, -15, 10, 0],
-            }}
-            transition={{
-              duration: 12 + i * 3,
-              ease: "easeInOut",
-              repeat: Infinity,
-              delay: orb.delay,
-            }}
-          />
-        ))}
-        {/* Dot grid pattern */}
-        <svg className="absolute inset-0 w-full h-full opacity-[0.035]" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <pattern id="hero-dots" x="0" y="0" width="28" height="28" patternUnits="userSpaceOnUse">
-              <circle cx="1.5" cy="1.5" r="1.5" fill="#0062FF" />
-            </pattern>
-          </defs>
-          <rect width="100%" height="100%" fill="url(#hero-dots)" />
-        </svg>
+    <div
+      className="w-full rounded-2xl border p-4 shadow-xl sm:p-5"
+      style={{ backgroundColor: "var(--th-card-bg-alt)", borderColor: "var(--th-card-border)" }}
+    >
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span
+            className="grid h-7 w-7 place-items-center rounded-lg"
+            style={{ backgroundColor: "color-mix(in srgb, var(--th-primary) 12%, transparent)" }}
+          >
+            <BarChart3 size={14} style={{ color: "var(--th-primary)" }} />
+          </span>
+          <div>
+            <p className="text-xs font-semibold" style={{ color: "var(--th-text-primary)" }}>
+              Your readiness
+            </p>
+            <p className="text-[10px]" style={{ color: "var(--th-text-faint)" }}>
+              After 5 mock interviews
+            </p>
+          </div>
+        </div>
+        <span
+          className="rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider"
+          style={{ borderColor: "var(--th-border)", color: "var(--th-text-faint)" }}
+        >
+          Sample report
+        </span>
       </div>
 
-      {/* Public Navbar */}
-      <Firstnav />
-
-      {/* Hero */}
-      <section ref={heroRef} className="relative overflow-hidden pt-2 md:pt-4 flex flex-col">
-
-        {/* ── Content (parallax wrapper) ── */}
-        <motion.div style={{ y: heroParallaxY, opacity: heroOpacity }} className="relative z-10">
-          <motion.div
-            variants={heroContainer}
-            initial={false}
-            animate="show"
-            className="max-w-7xl mx-auto px-4 sm:px-6 pt-4 md:pt-6 pb-6"
+      <div className="grid grid-cols-3 gap-2">
+        {[
+          { k: "Readiness", v: "72" },
+          { k: "Percentile", v: "84th" },
+          { k: "Band", v: "Strong" },
+        ].map((t) => (
+          <div
+            key={t.k}
+            className="rounded-lg border p-2.5"
+            style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-card-bg)" }}
           >
-            {/* Two-column layout */}
-            <div className="grid lg:grid-cols-2 gap-8 lg:gap-12 items-center">
-              {/* LEFT: Text content */}
-              <div className="text-left space-y-5">
+            <p className="whitespace-nowrap text-[9px] uppercase tracking-wide" style={{ color: "var(--th-text-faint)" }}>
+              {t.k}
+            </p>
+            <p
+              className="mt-0.5 text-base font-bold"
+              style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}
+            >
+              {t.v}
+            </p>
+          </div>
+        ))}
+      </div>
 
-                {/* Headline with cycling word */}
-                <motion.h1
-                  variants={heroItem}
-                  className="text-[clamp(2.4rem,5.5vw,4.2rem)] font-extrabold leading-[1.03] tracking-[-0.04em] "
-                  style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}
-                >
-                  Ace your {" "}
-                  <span className="relative inline-flex h-[1.1em] overflow-hidden align-bottom">
-                    <AnimatePresence mode="wait">
-                      <motion.span
-                        key={heroWordIdx}
-                        initial={{ y: 40, opacity: 0, filter: "blur(6px)" }}
-                        animate={{ y: 0, opacity: 1, filter: "blur(0px)" }}
-                        exit={{ y: -40, opacity: 0, filter: "blur(6px)" }}
-                        transition={{ type: "spring", stiffness: 220, damping: 22 }}
-                        className="inline-block text-[#0062FF]"
-                      >
-                        interview
-                      </motion.span>
-                    </AnimatePresence>
-                  </span>{" "}
-                  before Placement.
-                </motion.h1>
-
-                {/* Sub-description */}
-                <motion.p variants={heroItem} className="text-base max-w-md leading-relaxed" style={{ color: "var(--th-text-muted)" }}>
-                  Four adaptive interview rounds, intelligent proctoring and deep readiness analytics all in one focused platform built for campus placements.
-                </motion.p>
-
-                {/* CTA Buttons */}
-                <motion.div variants={heroItem} className="flex flex-wrap gap-3">
-                  <Link
-                    href="/register"
-                    className="inline-flex items-center gap-2 btn-primary !px-6 !py-3 !text-sm !rounded-full shadow-lg shadow-[#0062FF]/15 hover:shadow-xl hover:shadow-[#0062FF]/25 hover:-translate-y-0.5 transition-all font-semibold"
-                  >
-                    Start for free <ArrowRight size={15} />
-                  </Link>
-                  <Link
-                    href="/interview/setup"
-                    className="inline-flex items-center gap-2 btn-secondary !px-6 !py-3 !text-sm !rounded-full hover:-translate-y-0.5 transition-all"
-                    style={{ borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }}
-                  >
-                    <Play size={14} className="text-[#0062FF] fill-[#0062FF]" />
-                    Watch demo
-                  </Link>
-                </motion.div>
-
-                {/* Trust bar */}
-                <motion.div variants={heroItem} className="flex flex-wrap items-center gap-4 pt-1">
-                  {[
-                    { icon: Users, label: "12K+ students" },
-                    { icon: Target, label: "94% placement rate" },
-                    { icon: TrendingUp, label: "340+ companies" },
-                  ].map(({ icon: Icon, label }) => (
-                    <div key={label} className="flex items-center gap-1.5 text-xs font-medium" style={{ color: "var(--th-text-muted)" }}>
-                      <Icon size={13} className="text-[#0062FF]" />
-                      {label}
-                    </div>
-                  ))}
-                </motion.div>
-              </div>
-
-              {/* RIGHT: Lottie Hero Animation */}
-              <div className="flex justify-center items-center lg:justify-end w-full aspect-[6/4] max-w-[500px] mx-auto relative">
-                <iframe
-                  src="https://lottie.host/embed/90610a18-c0c2-44a0-a573-af6ce3d8a77d/ymsXZDyPPK.lottie"
-                  className="w-full h-full border-none bg-transparent"
-                  title="Hero Lottie Animation"
-                  style={{
-                    background: "transparent",
-                    filter: isDark
-                      ? "drop-shadow(0 25px 40px rgba(0, 98, 255, 0.35)) drop-shadow(0 4px 12px rgba(0, 98, 255, 0.2))"
-                      : "drop-shadow(0 25px 35px rgba(0, 98, 255, 0.18)) drop-shadow(0 4px 10px rgba(0, 0, 0, 0.06))",
+      <div className="mt-3 grid items-center gap-2 sm:grid-cols-[1.15fr_1fr]">
+        <div className="h-[176px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <RadarChart data={RADAR_DATA} outerRadius="70%" margin={{ top: 6, right: 18, bottom: 6, left: 18 }}>
+              <PolarGrid stroke="var(--th-border)" />
+              <PolarAngleAxis dataKey="k" tick={{ fontSize: 8.5, fill: "var(--th-text-faint)" }} />
+              <Radar dataKey="v" stroke="#0062FF" fill="#0062FF" fillOpacity={0.28} />
+            </RadarChart>
+          </ResponsiveContainer>
+        </div>
+        <div>
+          <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide" style={{ color: "var(--th-text-faint)" }}>
+            Readiness over time
+          </p>
+          <div className="h-[132px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={TREND} margin={{ top: 6, right: 4, bottom: 0, left: 4 }}>
+                <defs>
+                  <linearGradient id="heroTrend" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#3DDC84" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="#3DDC84" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <XAxis dataKey="m" tick={{ fontSize: 8, fill: "var(--th-text-faint)" }} axisLine={false} tickLine={false} interval={1} />
+                <Tooltip
+                  contentStyle={{
+                    fontSize: 11,
+                    borderRadius: 8,
+                    border: "1px solid var(--th-card-border)",
+                    background: "var(--th-card-bg-alt)",
+                    color: "var(--th-text-primary)",
                   }}
                 />
-              </div>
+                <Area type="monotone" dataKey="v" name="Readiness" stroke="#3DDC84" strokeWidth={2} fill="url(#heroTrend)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── round visuals ─────────────────────────────────────────────────────── */
+
+function RoundVisual({ roundKey }: { roundKey: string }) {
+  const shell = "rounded-xl border p-4 h-full";
+  const shellStyle = { borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg-alt)" } as const;
+
+  if (roundKey === "coding") {
+    return (
+      <div className={`${shell} font-mono`} style={shellStyle}>
+        <div className="mb-2 flex items-center gap-1.5">
+          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: "#D64545" }} />
+          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: "#B7791F" }} />
+          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: "#149A5C" }} />
+          <span className="ml-2 text-[10px]" style={{ color: "var(--th-text-faint)" }}>two-sum.py</span>
+        </div>
+        <pre className="text-[10px] leading-relaxed" style={{ color: "var(--th-text-secondary)" }}>
+{`def two_sum(nums, target):
+    seen = {}
+    for i, n in enumerate(nums):
+        if target - n in seen:
+            return [seen[target-n], i]
+        seen[n] = i`}
+        </pre>
+        <div className="mt-3 space-y-1">
+          {[["Sample 1", true], ["Sample 2", true], ["Hidden 1", true], ["Hidden 2", false]].map(([n, ok]) => (
+            <div key={n as string} className="flex items-center justify-between text-[10px]">
+              <span style={{ color: "var(--th-text-muted)" }}>{n as string}</span>
+              <span style={{ color: ok ? "#149A5C" : "#D64545" }}>{ok ? "passed" : "failed"}</span>
             </div>
-          </motion.div>
-        </motion.div>
-
-        {/* Scroll chevron */}
-        <motion.div
-          initial={false}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 2 }}
-          className="absolute bottom-8 left-1/2 -translate-x-1/2 z-20 hidden md:flex flex-col items-center gap-1"
-        >
-          <motion.div
-            animate={{ y: [0, 8, 0] }}
-            transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
-            className="w-5 h-8 rounded-full border-2 border-[#D4D0C5] flex items-start justify-center pt-1.5"
-          >
-            <div className="w-1 h-2 bg-[#9CA3AF] rounded-full" />
-          </motion.div>
-        </motion.div>
-      </section>
-
-      {/* Stats */}
-      <section style={{ borderColor: "var(--th-border)", borderTopWidth: 1, borderBottomWidth: 1, backgroundColor: "var(--th-stats-bg)" }}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-12">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
-            {stats.map((stat, i) => (
-              <div key={i} className="text-center space-y-1">
-                <div
-                  className="text-[2.25rem] font-bold text-[#0062FF] tracking-tight mb-0.5 leading-none"
-                  style={{ fontFamily: "var(--font-inter-tight), sans-serif" }}
-                >
-                  {statsVisible ? (
-                    <CountUp end={stat.value} suffix={stat.suffix} decimals={stat.decimals ?? 0} />
-                  ) : (
-                    "0" + stat.suffix
-                  )}
-                </div>
-                <div className="text-xs font-medium uppercase tracking-wider" style={{ color: "var(--th-text-muted)" }}>{stat.label}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Student vs Officer Portal Interactive Showcase */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 py-14 sm:py-24">
-        <div className="text-center max-w-2xl mx-auto mb-16 space-y-3">
-          <span className="label-caption" style={{ color: "var(--th-text-faint)" }}>Two platforms, one unified system</span>
-          <h2
-            className="text-[2.25rem] font-bold tracking-tight"
-            style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}
-          >
-            Built for students AND the teams that place them.
-          </h2>
-          <p className="text-sm" style={{ color: "var(--th-text-muted)" }}>
-            Toggle between the portals below to see how Synclyft AI bridges candidates and administrators.
-          </p>
-
-          {/* Interactive Toggle Switch */}
-          <div className="inline-flex p-1 rounded-full relative mt-4" style={{ backgroundColor: "var(--th-bg-secondary)", border: "1px solid var(--th-border)" }}>
-            <button
-              onClick={() => setActivePortal("student")}
-              className={cn(
-                "relative z-10 px-6 py-2 rounded-full text-xs font-semibold tracking-wide uppercase transition-colors",
-                activePortal === "student" ? "text-white" : ""
-              )}
-              style={activePortal !== "student" ? { color: "var(--th-text-muted)" } : {}}
-            >
-              {activePortal === "student" && (
-                <motion.div
-                  layoutId="activePortalTab"
-                  className="absolute inset-0 bg-[#0062FF] rounded-full -z-10"
-                  transition={{ type: "spring", stiffness: 380, damping: 30 }}
-                />
-              )}
-              Student Portal
-            </button>
-            <button
-              onClick={() => setActivePortal("officer")}
-              className={cn(
-                "relative z-10 px-6 py-2 rounded-full text-xs font-semibold tracking-wide uppercase transition-colors",
-                activePortal === "officer" ? "text-white" : ""
-              )}
-              style={activePortal !== "officer" ? { color: "var(--th-text-muted)" } : {}}
-            >
-              {activePortal === "officer" && (
-                <motion.div
-                  layoutId="activePortalTab"
-                  className="absolute inset-0 bg-[#0062FF] rounded-full -z-10"
-                  transition={{ type: "spring", stiffness: 380, damping: 30 }}
-                />
-              )}
-              Officer Portal
-            </button>
-          </div>
-        </div>
-
-        <div className="min-h-[430px] flex items-center justify-center">
-          <AnimatePresence mode="wait">
-            {activePortal === "student" ? (
-              <motion.div
-                key="student"
-                initial={false}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-                transition={{ duration: 0.3 }}
-                className="w-full max-w-5xl"
-              >
-                <div className="p-6 md:p-8 shadow-lg rounded-2xl grid md:grid-cols-12 gap-6 md:gap-8 items-center" style={{ backgroundColor: "var(--th-card-bg)", border: "1px solid var(--th-card-border)" }}>
-                  <div className="md:col-span-7 space-y-6">
-                    <div className="flex items-center justify-between">
-                      <Badge variant="amber">Student Portal</Badge>
-                      <span className="text-[0.65rem] font-mono tracking-widest uppercase" style={{ color: "var(--th-text-faint)" }}>Candidate Experience</span>
-                    </div>
-                    <div className="space-y-3">
-                      <h3 className="text-xl md:text-2xl font-bold" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
-                        The focused candidate console
-                      </h3>
-                      <p className="leading-relaxed text-sm" style={{ color: "var(--th-text-muted)" }}>
-                        Four AI adaptive interview rounds — Aptitude, Coding, Technical and HR with live proctoring,
-                        real-time analytics and a readiness score that tells you exactly where you stand before day zero.
-                      </p>
-                    </div>
-                    <div className="grid sm:grid-cols-2 gap-3 pt-1">
-                      {[
-                        "AI-adaptive calibration",
-                        "Monaco IDE workspace",
-                        "Conversational HR round",
-                        "ATS resume optimizer",
-                        "Narrative AI insights"
-                      ].map((f) => (
-                        <div key={f} className="flex items-center gap-2 text-xs font-medium" style={{ color: "var(--th-text-secondary)" }}>
-                          <CheckCircle size={14} className="text-[#3DDC84] shrink-0" />
-                          <span>{f}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="pt-4 flex items-center justify-between" style={{ borderTop: "1px solid var(--th-border)" }}>
-                      <Link href="/dashboard" className="inline-flex items-center gap-1.5 text-[#0062FF] text-sm font-semibold hover:gap-2.5 transition-all">
-                        View student dashboard <ChevronRight size={16} />
-                      </Link>
-                      <span className="text-[10px] italic" style={{ color: "var(--th-text-faint)" }}>Designed for candidates</span>
-                    </div>
-                  </div>
-                  <div className="md:col-span-5 relative overflow-hidden rounded-xl aspect-[4/3] flex items-center justify-center" style={{ border: "1px solid var(--th-border)", backgroundColor: "var(--th-bg-secondary)" }}>
-                    <Image
-                      src="/images/coding_mockup.png"
-                      alt="Student Coding Console Mockup"
-                      fill
-                      className="object-cover w-full h-full hover:scale-105 transition-transform duration-500"
-                    />
-                  </div>
-                </div>
-              </motion.div>
-            ) : (
-              <motion.div
-                key="officer"
-                initial={false}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -15 }}
-                transition={{ duration: 0.3 }}
-                className="w-full max-w-5xl"
-              >
-                <div className="card-light p-6 md:p-8 shadow-xl rounded-2xl bg-var(--th-bg-secondary) text-var(--th-text-primary) grid md:grid-cols-12 gap-6 md:gap-8 items-center">
-                  <div className="md:col-span-7 space-y-6">
-                    <div className="flex items-center justify-between">
-                      <Badge variant="cobalt">Officer Portal</Badge>
-                      <span className="text-[0.65rem] font-mono tracking-widest text-[var(--th-text-muted)] uppercase">Cohort Analytics</span>
-                    </div>
-                    <div className="space-y-3">
-                      <h3 className="text-xl md:text-2xl font-bold text-[var(--th-text-primary)]" style={{ fontFamily: "var(--font-inter-tight), sans-serif" }}>
-                        Batch intelligence at scale
-                      </h3>
-                      <p className="text-[var(--th-text-muted)] leading-relaxed text-sm">
-                        See every student&apos;s readiness score round-by-round breakdown and trajectory trend across
-                        your entire cohort in a single dense administrative console.
-                      </p>
-                    </div>
-                    <div className="grid sm:grid-cols-2 gap-3 pt-1">
-                      {[
-                        "Cohort readiness distribution",
-                        "Natural Language Querying",
-                        "AI batch reports",
-                        "Per-student academic audits",
-                        "Direct CSV / PDF export"
-                      ].map((f) => (
-                        <div key={f} className="flex items-center gap-2 text-xs text-[#9CA3AF] font-medium">
-                          <CheckCircle size={14} className="text-[#4D7CFF] shrink-0" />
-                          <span>{f}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="pt-4 border-t border-[#2A2F38] flex items-center justify-between">
-                      <Link href="/officer" className="inline-flex items-center gap-1.5 text-[#4D7CFF] text-sm font-semibold hover:gap-2.5 transition-all">
-                        Open officer portal <ChevronRight size={16} />
-                      </Link>
-                      <span className="text-[10px] text-[#6B7280] italic">Optimized for Placement Officers</span>
-                    </div>
-                  </div>
-                  <div className="md:col-span-5 relative overflow-hidden rounded-xl border border-[#2A2F38] shadow-inner bg-[#0B0D10] aspect-[4/3] flex items-center justify-center">
-                    <Image
-                      src="/images/dashboard_mockup.png"
-                      alt="Officer Dashboard Mockup"
-                      fill
-                      className="object-cover w-full h-full hover:scale-105 transition-transform duration-500"
-                    />
-                  </div>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      </section>
-
-      {/* Features Grid with Scroll Reveal */}
-      <section className="py-10" style={{ backgroundColor: "var(--th-bg-tertiary)", borderTop: "1px solid var(--th-border)", borderBottom: "1px solid var(--th-border)" }}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6">
-          <div className="text-center max-w-lg mx-auto mb-16 space-y-2">
-            <span className="label-caption" style={{ color: "var(--th-text-faint)" }}>Platform capabilities</span>
-            <h2
-              className="text-[2.25rem] font-bold tracking-tight"
-              style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}
-            >
-              Everything an interview needs.
-            </h2>
-          </div>
-
-          <motion.div
-            variants={heroContainer}
-            initial={false}
-            whileInView="show"
-            viewport={{ once: true, margin: "-100px" }}
-            className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6"
-          >
-            {features.map((feature) => (
-              <motion.div
-                key={feature.title}
-                variants={fadeUp}
-                whileHover={{
-                  y: -6,
-                  borderColor: "rgba(0, 98, 255, 0.3)",
-                  boxShadow: isDark ? "0 12px 30px rgba(0, 98, 255, 0.12)" : "0 12px 30px rgba(0, 98, 255, 0.04)",
-                }}
-                className="p-6 space-y-4 rounded-xl transition-all duration-300 group"
-                style={{ backgroundColor: "var(--th-card-bg)", border: "1px solid var(--th-card-border)" }}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="p-2.5 rounded-xl group-hover:bg-[#0062FF]/10 group-hover:text-[#0062FF] transition-colors duration-300" style={{ backgroundColor: "var(--th-bg-secondary)", color: "var(--th-text-primary)" }}>
-                    <feature.icon size={18} className="transition-transform duration-300 group-hover:scale-110" />
-                  </div>
-                  <Badge variant="neutral">{feature.tag}</Badge>
-                </div>
-                <div className="space-y-1.5">
-                  <h3 className="font-semibold text-base group-hover:text-[#0062FF] transition-colors" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
-                    {feature.title}
-                  </h3>
-                  <p className="text-xs leading-relaxed" style={{ color: "var(--th-text-muted)" }}>{feature.desc}</p>
-                </div>
-              </motion.div>
-            ))}
-          </motion.div>
-        </div>
-      </section>
-
-      {/* Testimonials with Scroll Reveal */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 py-10">
-        <div className="text-center max-w-lg mx-auto mb-16 space-y-2">
-          <span className="label-caption" style={{ color: "var(--th-text-faint)" }}>What candidates and officers say</span>
-          <h2
-            className="text-[2.25rem] font-bold tracking-tight"
-            style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}
-          >
-            The results speak clearly.
-          </h2>
-        </div>
-
-        <motion.div
-          variants={heroContainer}
-          initial={false}
-          whileInView="show"
-          viewport={{ once: true, margin: "-100px" }}
-          className="grid md:grid-cols-3 gap-6"
-        >
-          {testimonials.map((t) => (
-            <motion.div
-              key={t.name}
-              variants={fadeUp}
-              whileHover={{ y: -5, boxShadow: isDark ? "0 15px 35px rgba(0,0,0,0.3)" : "0 15px 35px rgba(0,0,0,0.04)" }}
-              className="p-6 space-y-5 rounded-xl flex flex-col justify-between"
-              style={{ backgroundColor: "var(--th-card-bg)", border: "1px solid var(--th-card-border)" }}
-            >
-              <div className="space-y-4">
-                <div className="flex items-center gap-0.5">
-                  {[...Array(5)].map((_, i) => (
-                    <Star key={i} size={13} className="text-[#0062FF] fill-[#0062FF]" />
-                  ))}
-                </div>
-                <p className="text-sm leading-relaxed italic" style={{ color: "var(--th-text-secondary)" }}>&quot;{t.content}&quot;</p>
-              </div>
-              <div className="flex items-end justify-between pt-4" style={{ borderTop: "1px solid var(--th-border)" }}>
-                <div>
-                  <div className="font-semibold text-sm" style={{ color: "var(--th-text-primary)" }}>{t.name}</div>
-                  <div className="text-xs" style={{ color: "var(--th-text-muted)" }}>{t.role}</div>
-                  <div className="text-xs font-mono mt-0.5" style={{ color: "var(--th-text-faint)" }}>{t.college}</div>
-                </div>
-                {t.grade && (
-                  <div className="text-right">
-                    <div className="font-mono text-[0.6rem] text-[#9CA3AF] uppercase tracking-wider">Readiness</div>
-                    <div
-                      className="text-xl font-extrabold text-[#3DDC84] leading-none my-0.5"
-                      style={{ fontFamily: "var(--font-inter-tight), sans-serif" }}
-                    >
-                      {t.score}
-                    </div>
-                    <Badge variant="verdant">{t.grade}</Badge>
-                  </div>
-                )}
-              </div>
-            </motion.div>
           ))}
-        </motion.div>
-      </section>
+        </div>
+      </div>
+    );
+  }
 
-      {/* Pricing with Highlighted Option */}
-      <section id="pricing" className="py-10" style={{ backgroundColor: "var(--th-bg-tertiary)", borderTop: "1px solid var(--th-border)", borderBottom: "1px solid var(--th-border)" }}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6">
-          <div className="text-center max-w-lg mx-auto mb-10 space-y-2">
-            <span className="label-caption" style={{ color: "var(--th-text-faint)" }}>Transparent pricing</span>
-            <h2
-              className="text-[2.25rem] font-bold tracking-tight"
-              style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}
-            >
-              Choose your prep level.
-            </h2>
-          </div>
+  if (roundKey === "aptitude") {
+    return (
+      <div className={shell} style={shellStyle}>
+        <p className="text-[11px] font-semibold" style={{ color: "var(--th-text-primary)" }}>Question palette</p>
+        <div className="mt-2 grid grid-cols-8 gap-1.5">
+          {Array.from({ length: 24 }).map((_, i) => {
+            const state = i < 9 ? "done" : i === 9 ? "current" : i < 12 ? "seen" : "todo";
+            const bg =
+              state === "done" ? "#149A5C" : state === "current" ? "var(--th-primary)" : state === "seen" ? "var(--th-border-strong)" : "var(--th-bg-secondary)";
+            return <span key={i} className="aspect-square rounded" style={{ backgroundColor: bg }} />;
+          })}
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2 text-[9px]" style={{ color: "var(--th-text-faint)" }}>
+          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded" style={{ background: "#149A5C" }} /> Answered</span>
+          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded" style={{ background: "var(--th-primary)" }} /> Current</span>
+          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded" style={{ background: "var(--th-border-strong)" }} /> Seen</span>
+        </div>
+      </div>
+    );
+  }
 
-          {/* Interactive Pricing Toggle */}
-          <div className="flex justify-center mb-12">
-            <div className="inline-flex p-1 rounded-full relative" style={{ backgroundColor: "var(--th-bg-secondary)", border: "1px solid var(--th-border)" }}>
-              <button
-                type="button"
-                onClick={() => setPricingTab("student")}
-                className={cn(
-                  "relative z-10 px-6 py-2 rounded-full text-xs font-semibold tracking-wide uppercase transition-colors border-0 cursor-pointer",
-                  pricingTab === "student" ? "text-white animate-none" : ""
-                )}
-                style={pricingTab !== "student" ? { color: "var(--th-text-muted)", backgroundColor: "transparent" } : {}}
-              >
-                {pricingTab === "student" && (
-                  <motion.div
-                    layoutId="activePricingTab"
-                    className="absolute inset-0 bg-[#0062FF] rounded-full -z-10"
-                    transition={{ type: "spring", stiffness: 380, damping: 30 }}
-                  />
-                )}
-                For Students
-              </button>
-              <button
-                type="button"
-                onClick={() => setPricingTab("org")}
-                className={cn(
-                  "relative z-10 px-6 py-2 rounded-full text-xs font-semibold tracking-wide uppercase transition-colors border-0 cursor-pointer",
-                  pricingTab === "org" ? "text-white animate-none" : ""
-                )}
-                style={pricingTab !== "org" ? { color: "var(--th-text-muted)", backgroundColor: "transparent" } : {}}
-              >
-                {pricingTab === "org" && (
-                  <motion.div
-                    layoutId="activePricingTab"
-                    className="absolute inset-0 bg-[#0062FF] rounded-full -z-10"
-                    transition={{ type: "spring", stiffness: 380, damping: 30 }}
-                  />
-                )}
-                For Organizations
-              </button>
+  if (roundKey === "technical") {
+    return (
+      <div className={shell} style={shellStyle}>
+        <div className="flex items-center gap-2">
+          <span className="grid h-8 w-8 place-items-center rounded-full" style={{ backgroundColor: "color-mix(in srgb, var(--th-primary) 14%, transparent)" }}>
+            <ScanFace size={15} style={{ color: "var(--th-primary)" }} />
+          </span>
+          <div className="flex-1">
+            <div className="flex items-end gap-0.5">
+              {[6, 12, 8, 16, 10, 14, 7, 13, 9].map((h, i) => (
+                <span key={i} className="w-1 rounded-full" style={{ height: h, backgroundColor: "var(--th-primary)" }} />
+              ))}
             </div>
           </div>
+        </div>
+        <div className="mt-3 space-y-2">
+          <p className="rounded-lg px-2.5 py-1.5 text-[10px]" style={{ backgroundColor: "var(--th-bg-secondary)", color: "var(--th-text-secondary)" }}>
+            “Walk me through the caching layer in your project.”
+          </p>
+          <p className="ml-6 rounded-lg px-2.5 py-1.5 text-[10px]" style={{ backgroundColor: "color-mix(in srgb, var(--th-primary) 10%, transparent)", color: "var(--th-text-secondary)" }}>
+            “We used Redis with a 60-second TTL and…”
+          </p>
+        </div>
+      </div>
+    );
+  }
 
-          {/* Monthly / yearly billing toggle */}
-          <div className="flex justify-center mb-8 -mt-6">
-            <div className="inline-flex p-1 rounded-full" style={{ backgroundColor: "var(--th-bg-secondary)", border: "1px solid var(--th-border)" }}>
+  // hr
+  return (
+    <div className={shell} style={shellStyle}>
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] font-semibold" style={{ color: "var(--th-text-primary)" }}>Live scoring</p>
+        <span className="flex items-center gap-1 text-[9px] font-semibold" style={{ color: "#D64545" }}>
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ backgroundColor: "#D64545" }} /> REC
+        </span>
+      </div>
+      <div className="mt-3 space-y-2.5">
+        {[["Communication", 82], ["Structure", 68], ["Clarity", 74], ["Confidence", 71]].map(([k, v]) => (
+          <div key={k as string}>
+            <div className="flex items-center justify-between text-[10px]">
+              <span style={{ color: "var(--th-text-muted)" }}>{k as string}</span>
+              <span className="font-semibold" style={{ color: "var(--th-text-secondary)" }}>{v as number}</span>
+            </div>
+            <span className="mt-1 block h-1.5 overflow-hidden rounded-full" style={{ backgroundColor: "var(--th-bg-secondary)" }}>
+              <span className="block h-full rounded-full" style={{ width: `${v as number}%`, backgroundColor: "var(--th-primary)" }} />
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ── page ──────────────────────────────────────────────────────────────── */
+
+export default function StudentLanding() {
+  const [heroWord, setHeroWord] = useState(0);
+  const [round, setRound] = useState(0);
+  const [faq, setFaq] = useState<number | null>(0);
+  const [audience, setAudience] = useState<"student" | "college">("student");
+  const [pricingTab, setPricingTab] = useState<"student" | "org">("student");
+  const [billing, setBilling] = useState<"monthly" | "yearly">("yearly");
+  const [studentCat, setStudentCat] = useState<Record<string, RawPlan> | null>(null);
+  const [orgCat, setOrgCat] = useState<Record<string, RawPlan> | null>(null);
+  const [statsIn, setStatsIn] = useState(false);
+  const statsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const id = setInterval(() => setHeroWord((i) => (i + 1) % HERO_WORDS.length), 2200);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    let off = false;
+    subscriptionService.plansPublic().then((m) => !off && setStudentCat(m as Record<string, RawPlan>)).catch(() => {});
+    subscriptionService.orgPlans().then((m) => !off && setOrgCat(m as Record<string, RawPlan>)).catch(() => {});
+    return () => {
+      off = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const el = statsRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      ([e]) => {
+        if (e.isIntersecting) {
+          setStatsIn(true);
+          io.disconnect();
+        }
+      },
+      { threshold: 0.3 },
+    );
+    io.observe(el);
+    const t = setTimeout(() => setStatsIn(true), 1600);
+    return () => {
+      io.disconnect();
+      clearTimeout(t);
+    };
+  }, []);
+
+  const cards = useMemo(() => {
+    const map = pricingTab === "student" ? studentCat : orgCat;
+    return map ? buildCards(map, billing, pricingTab === "student" ? "student" : "org") : [];
+  }, [pricingTab, studentCat, orgCat, billing]);
+
+  const activeRound = ROUNDS[round];
+
+  return (
+    <div
+      className="min-h-screen"
+      style={{ backgroundColor: "var(--th-bg)", color: "var(--th-text-primary)", fontFamily: "var(--font-inter), sans-serif" }}
+    >
+      <style>{`
+        @keyframes slLift { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+        .sl-lift { animation: slLift 260ms cubic-bezier(0.22,1,0.36,1); }
+        @keyframes slWord { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+        .sl-word { animation: slWord 320ms ease; }
+        @media (prefers-reduced-motion: reduce) { .sl-lift, .sl-word { animation: none; } }
+      `}</style>
+
+      <Firstnav />
+
+      <main>
+        {/* ── hero ── */}
+        <section className="relative overflow-hidden">
+          <div className="pointer-events-none absolute inset-0 -z-10" style={{ background: "var(--th-hero-grad)" }} />
+          <div className="mx-auto grid max-w-7xl items-center gap-10 px-4 py-14 sm:px-6 sm:py-16 md:py-20 lg:grid-cols-[1.05fr_0.95fr] lg:gap-12">
+            <div>
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium"
+                style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-surface)", color: "var(--th-text-secondary)" }}
+              >
+                <Sparkles size={13} style={{ color: "var(--th-primary)" }} />
+                Built for campus placements
+              </span>
+
+              <h1
+                className="mt-5 text-[2rem] font-semibold leading-[1.05] tracking-tight sm:text-[2.75rem] md:text-[3.4rem]"
+                style={{ fontFamily: "var(--font-inter-tight), sans-serif" }}
+              >
+                Practise the{" "}
+                <span className="relative inline-grid align-bottom">
+                  <span key={heroWord} className="sl-word col-start-1 row-start-1" style={{ color: "var(--th-primary)" }}>
+                    {HERO_WORDS[heroWord]}
+                  </span>
+                </span>{" "}
+                round before it counts.
+              </h1>
+
+              <p className="mt-5 max-w-xl text-base leading-relaxed md:text-lg" style={{ color: "var(--th-text-secondary)" }}>
+                Four adaptive interview rounds, a real coding sandbox, voice AI interviewers and a readiness report
+                that tells you exactly where you stand — start with 3 free mock interviews.
+              </p>
+
+              <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+                <Link href="/register" className="w-full sm:w-auto">
+                  <button className="btn-primary w-full justify-center !rounded-full !px-6 !py-3 !text-sm sm:w-auto">
+                    Start free — no card <ArrowRight size={15} />
+                  </button>
+                </Link>
+                <Link href="/pricing" className="w-full sm:w-auto">
+                  <button className="btn-secondary w-full justify-center !rounded-full !px-6 !py-3 !text-sm sm:w-auto">
+                    See plans
+                  </button>
+                </Link>
+              </div>
+
+              <div className="mt-8 flex flex-wrap gap-x-6 gap-y-2">
+                {[
+                  { icon: Code2, label: "Real code sandbox" },
+                  { icon: Mic2, label: "Voice AI interviewers" },
+                  { icon: ScanFace, label: "Calibrated proctoring" },
+                ].map(({ icon: Icon, label }) => (
+                  <span key={label} className="flex items-center gap-1.5 text-xs font-medium" style={{ color: "var(--th-text-muted)" }}>
+                    <Icon size={13} style={{ color: "var(--th-primary)" }} />
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <Reveal delay={80}>
+              <HeroPreview />
+            </Reveal>
+          </div>
+        </section>
+
+        {/* ── capability stats ── */}
+        <section ref={statsRef} className="border-y" style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-stats-bg)" }}>
+          <div className="mx-auto grid max-w-7xl gap-x-8 gap-y-6 px-4 py-10 sm:grid-cols-2 sm:px-6 sm:py-12 lg:grid-cols-4">
+            {CAPABILITY_STATS.map((s) => (
+              <div key={s.label}>
+                <div
+                  className="text-[2.1rem] font-bold leading-none tracking-tight"
+                  style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-primary)" }}
+                >
+                  {s.value !== null ? (statsIn ? <CountUp end={s.value} suffix={s.suffix ?? ""} /> : `0${s.suffix ?? ""}`) : s.display}
+                </div>
+                <div className="mt-2 text-sm font-semibold" style={{ color: "var(--th-text-primary)" }}>{s.label}</div>
+                <div className="mt-1 text-xs leading-relaxed" style={{ color: "var(--th-text-muted)" }}>{s.sub}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* ── the four rounds ── */}
+        <section id="features" className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-20">
+          <Reveal className="mx-auto mb-8 max-w-2xl text-center sm:mb-10">
+            <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--th-text-faint)" }}>
+              One mock, four rounds
+            </span>
+            <h2 className="mt-3 text-3xl font-semibold tracking-tight md:text-4xl" style={{ fontFamily: "var(--font-inter-tight), sans-serif" }}>
+              The whole interview, not a quiz.
+            </h2>
+          </Reveal>
+
+          <div className="mb-8 flex flex-wrap justify-center gap-2">
+            {ROUNDS.map((r, i) => {
+              const Icon = r.icon;
+              const on = i === round;
+              return (
+                <button
+                  key={r.key}
+                  onClick={() => setRound(i)}
+                  className="relative flex items-center gap-1.5 rounded-full border px-4 py-2 text-xs font-semibold transition-colors"
+                  style={{
+                    color: on ? "#fff" : "var(--th-text-secondary)",
+                    backgroundColor: on ? "var(--th-primary)" : "var(--th-surface)",
+                    borderColor: on ? "var(--th-primary)" : "var(--th-border)",
+                  }}
+                >
+                  {on && (
+                    <motion.span
+                      layoutId="roundPill"
+                      className="absolute inset-0 rounded-full"
+                      style={{ backgroundColor: "var(--th-primary)" }}
+                      transition={{ type: "spring", stiffness: 380, damping: 32 }}
+                    />
+                  )}
+                  <span className="relative flex items-center gap-1.5">
+                    <Icon size={13} />
+                    {r.name}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div
+            key={activeRound.key}
+            className="sl-lift grid gap-6 rounded-2xl border p-6 sm:p-8 lg:grid-cols-2 lg:items-center"
+            style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}
+          >
+            <div>
+              <span className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: "var(--th-primary)" }}>
+                {activeRound.tag}
+              </span>
+              <h3 className="mt-1.5 text-xl font-semibold tracking-tight md:text-2xl" style={{ fontFamily: "var(--font-inter-tight), sans-serif" }}>
+                {activeRound.name} round
+              </h3>
+              <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--th-text-secondary)" }}>{activeRound.blurb}</p>
+              <ul className="mt-5 space-y-2.5">
+                {activeRound.points.map((p) => (
+                  <li key={p} className="flex items-start gap-2.5 text-sm" style={{ color: "var(--th-text-secondary)" }}>
+                    <Check size={15} strokeWidth={2.5} className="mt-0.5 shrink-0" style={{ color: "var(--th-primary)" }} />
+                    {p}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="min-h-[220px]">
+              <RoundVisual roundKey={activeRound.key} />
+            </div>
+          </div>
+        </section>
+
+        {/* ── how it works ── */}
+        <section id="how" className="border-y" style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-bg-secondary)" }}>
+          <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-20">
+            <Reveal className="mx-auto mb-10 max-w-2xl text-center sm:mb-12">
+              <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--th-text-faint)" }}>
+                How it works
+              </span>
+              <h2 className="mt-3 text-3xl font-semibold tracking-tight md:text-4xl" style={{ fontFamily: "var(--font-inter-tight), sans-serif" }}>
+                From sign-up to study plan in one sitting.
+              </h2>
+            </Reveal>
+
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+              {STEPS.map((s, i) => (
+                <Reveal key={s.title} delay={i * 70}>
+                  <div className="relative h-full rounded-2xl border p-5" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
+                    <span
+                      className="absolute right-4 top-4 text-2xl font-bold tabular-nums"
+                      style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "color-mix(in srgb, var(--th-primary) 22%, transparent)" }}
+                    >
+                      {String(i + 1).padStart(2, "0")}
+                    </span>
+                    <span className="grid h-10 w-10 place-items-center rounded-xl" style={{ backgroundColor: "color-mix(in srgb, var(--th-primary) 12%, transparent)" }}>
+                      <s.icon size={18} style={{ color: "var(--th-primary)" }} />
+                    </span>
+                    <h3 className="mt-4 text-sm font-semibold" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
+                      {s.title}
+                    </h3>
+                    <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--th-text-muted)" }}>{s.body}</p>
+                  </div>
+                </Reveal>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* ── your readiness report ── */}
+        <section className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-20">
+          <div className="grid gap-10 lg:grid-cols-2 lg:items-center">
+            <Reveal>
+              <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--th-text-faint)" }}>
+                After every mock
+              </span>
+              <h2 className="mt-3 text-3xl font-semibold tracking-tight md:text-4xl" style={{ fontFamily: "var(--font-inter-tight), sans-serif" }}>
+                An intelligence briefing, not a scorecard.
+              </h2>
+              <p className="mt-4 text-sm leading-relaxed" style={{ color: "var(--th-text-secondary)" }}>
+                Your report weighs every round into one readiness score, then breaks down exactly what to fix — and
+                hands you a study plan to fix it.
+              </p>
+              <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                {REPORT_ITEMS.map((it) => (
+                  <div key={it.title} className="flex gap-3">
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg" style={{ backgroundColor: "var(--th-bg-secondary)" }}>
+                      <it.icon size={16} style={{ color: "var(--th-primary)" }} />
+                    </span>
+                    <div>
+                      <p className="text-sm font-semibold" style={{ color: "var(--th-text-primary)" }}>{it.title}</p>
+                      <p className="mt-0.5 text-xs leading-relaxed" style={{ color: "var(--th-text-muted)" }}>{it.body}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <Link href="/register" className="mt-7 inline-flex items-center gap-1.5 text-sm font-semibold" style={{ color: "var(--th-primary)" }}>
+                Run your first mock <ChevronRight size={15} />
+              </Link>
+            </Reveal>
+
+            <Reveal delay={90}>
+              <HeroPreview />
+            </Reveal>
+          </div>
+        </section>
+
+        {/* ── two audiences ── */}
+        <section className="border-y" style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-bg-secondary)" }}>
+          <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-20">
+            <Reveal className="mx-auto mb-8 max-w-2xl text-center">
+              <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--th-text-faint)" }}>
+                Two ways in
+              </span>
+              <h2 className="mt-3 text-3xl font-semibold tracking-tight md:text-4xl" style={{ fontFamily: "var(--font-inter-tight), sans-serif" }}>
+                Prep on your own — or through your college.
+              </h2>
+            </Reveal>
+
+            <div className="mx-auto mb-8 flex w-full max-w-xs rounded-full border p-1" style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-surface)" }}>
+              {(["student", "college"] as const).map((a) => (
+                <button
+                  key={a}
+                  onClick={() => setAudience(a)}
+                  className="flex-1 rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-wide transition-colors"
+                  style={audience === a ? { backgroundColor: "var(--th-primary)", color: "#fff" } : { color: "var(--th-text-muted)" }}
+                >
+                  {a === "student" ? "As a student" : "Through college"}
+                </button>
+              ))}
+            </div>
+
+            <div
+              key={audience}
+              className="sl-lift grid gap-6 rounded-2xl border p-6 sm:p-8 lg:grid-cols-[1fr_0.85fr] lg:items-center"
+              style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}
+            >
+              {audience === "student" ? (
+                <>
+                  <div>
+                    <span className="grid h-10 w-10 place-items-center rounded-xl" style={{ backgroundColor: "color-mix(in srgb, var(--th-primary) 12%, transparent)" }}>
+                      <GraduationCap size={18} style={{ color: "var(--th-primary)" }} />
+                    </span>
+                    <h3 className="mt-4 text-xl font-semibold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif" }}>
+                      The focused candidate console
+                    </h3>
+                    <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--th-text-secondary)" }}>
+                      Everything you need to walk in ready — adaptive rounds, an ATS resume analyzer, a readiness score
+                      and an AI study plan. Free to start, subscribe when you&apos;re serious.
+                    </p>
+                    <ul className="mt-5 grid gap-2.5 sm:grid-cols-2">
+                      {["Adaptive interview rounds", "ATS resume analyzer", "Readiness radar & trend", "AI study plans", "Percentile bands", "Past-report history"].map((f) => (
+                        <li key={f} className="flex items-center gap-2 text-xs" style={{ color: "var(--th-text-secondary)" }}>
+                          <Check size={13} strokeWidth={2.5} style={{ color: "var(--th-primary)" }} /> {f}
+                        </li>
+                      ))}
+                    </ul>
+                    <Link href="/register" className="mt-6 inline-flex items-center gap-1.5 text-sm font-semibold" style={{ color: "var(--th-primary)" }}>
+                      Create a free account <ChevronRight size={15} />
+                    </Link>
+                  </div>
+                  <div className="rounded-xl border p-4" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg-alt)" }}>
+                    <RoundVisual roundKey="hr" />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <span className="grid h-10 w-10 place-items-center rounded-xl" style={{ backgroundColor: "color-mix(in srgb, var(--th-primary) 12%, transparent)" }}>
+                      <Building2 size={18} style={{ color: "var(--th-primary)" }} />
+                    </span>
+                    <h3 className="mt-4 text-xl font-semibold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif" }}>
+                      Seated by your placement cell
+                    </h3>
+                    <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--th-text-secondary)" }}>
+                      If your college runs Synclyft, a seat gives you full access to every round at no personal cost —
+                      and your results roll straight up into your placement cell&apos;s dashboards.
+                    </p>
+                    <ul className="mt-5 grid gap-2.5 sm:grid-cols-2">
+                      {["Full access, zero cost to you", "Assigned placement drives", "Officer-scheduled follow-ups", "Batch benchmarking", "Proctored, credible scores", "Board-ready reports"].map((f) => (
+                        <li key={f} className="flex items-center gap-2 text-xs" style={{ color: "var(--th-text-secondary)" }}>
+                          <Check size={13} strokeWidth={2.5} style={{ color: "var(--th-primary)" }} /> {f}
+                        </li>
+                      ))}
+                    </ul>
+                    <a
+                      href={process.env.NEXT_PUBLIC_OFFICER_URL || "/pricing"}
+                      className="mt-6 inline-flex items-center gap-1.5 text-sm font-semibold"
+                      style={{ color: "var(--th-primary)" }}
+                    >
+                      For placement cells <ChevronRight size={15} />
+                    </a>
+                  </div>
+                  <div className="rounded-xl border p-4" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg-alt)" }}>
+                    <RoundVisual roundKey="aptitude" />
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* ── pricing ── */}
+        <section id="pricing" className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-20">
+          <Reveal className="mx-auto mb-8 max-w-2xl text-center">
+            <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--th-text-faint)" }}>
+              Transparent pricing
+            </span>
+            <h2 className="mt-3 text-3xl font-semibold tracking-tight md:text-4xl" style={{ fontFamily: "var(--font-inter-tight), sans-serif" }}>
+              Free to start. Fair when you scale.
+            </h2>
+            <p className="mt-3 text-sm" style={{ color: "var(--th-text-muted)" }}>
+              Pulled live from our billing catalogue.
+            </p>
+          </Reveal>
+
+          <div className="mb-6 flex flex-wrap justify-center gap-3">
+            <div className="inline-flex rounded-full border p-1" style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-surface)" }}>
+              {(["student", "org"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setPricingTab(t)}
+                  className="rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-wide transition-colors"
+                  style={pricingTab === t ? { backgroundColor: "var(--th-primary)", color: "#fff" } : { color: "var(--th-text-muted)" }}
+                >
+                  {t === "student" ? "For students" : "For colleges"}
+                </button>
+              ))}
+            </div>
+            <div className="inline-flex rounded-full border p-1" style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-surface)" }}>
               {(["monthly", "yearly"] as const).map((b) => (
                 <button
                   key={b}
-                  type="button"
                   onClick={() => setBilling(b)}
-                  className="px-4 py-1.5 rounded-full text-[0.7rem] font-semibold uppercase tracking-wide transition-colors border-0 cursor-pointer"
-                  style={billing === b
-                    ? { backgroundColor: "#0062FF", color: "#fff" }
-                    : { backgroundColor: "transparent", color: "var(--th-text-muted)" }}
+                  className="rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-wide transition-colors"
+                  style={billing === b ? { backgroundColor: "var(--th-primary)", color: "#fff" } : { color: "var(--th-text-muted)" }}
                 >
                   {b === "yearly" ? "Yearly · save ~17%" : "Monthly"}
                 </button>
@@ -832,188 +956,146 @@ export default function LandingPage() {
             </div>
           </div>
 
-          {(() => {
-            const cards =
-              pricingTab === "student"
-                ? studentCatalog ? buildStudentCards(studentCatalog, billing) : []
-                : orgCatalog ? buildOrgCards(orgCatalog, billing) : [];
-
-            if (cards.length === 0) {
-              return (
-                <div className="grid gap-6 max-w-5xl mx-auto sm:grid-cols-2 lg:grid-cols-3">
-                  {[0, 1, 2].map((i) => (
-                    <div key={i} className="h-96 rounded-2xl border animate-pulse" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }} />
-                  ))}
-                </div>
-              );
-            }
-
-            return (
-              <div className="grid gap-6 max-w-5xl mx-auto sm:grid-cols-2 lg:grid-cols-3 items-stretch">
-                {cards.map((plan) => (
-                  <div
-                    key={plan.key}
-                    className={cn(
-                      "p-7 rounded-2xl border space-y-6 flex flex-col justify-between transition-transform duration-200 hover:-translate-y-1",
-                      plan.highlighted ? "bg-[#12151A] border-[#0062FF] text-white shadow-xl lg:-translate-y-2 relative" : ""
-                    )}
-                    style={!plan.highlighted ? { backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)", color: "var(--th-text-primary)" } : {}}
-                  >
-                    {plan.highlighted && (
-                      <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#0062FF] text-white text-[0.65rem] font-bold uppercase tracking-widest px-3 py-1 rounded-full shadow-sm">
-                        Most Popular
-                      </span>
-                    )}
-                    <div className="space-y-4">
-                      <div>
-                        <div className={cn("font-semibold text-xs uppercase tracking-wider", plan.highlighted ? "text-[#0062FF]" : "")} style={!plan.highlighted ? { color: "var(--th-text-muted)" } : {}}>
-                          {plan.name}
-                        </div>
-                        <div className="flex items-baseline gap-1 mt-2">
-                          <span
-                            className="text-[2rem] font-bold leading-none tracking-tight"
-                            style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: plan.highlighted ? "#0062FF" : "var(--th-text-primary)" }}
-                          >
-                            {plan.price}
-                          </span>
-                          <span className="text-xs font-mono" style={{ color: plan.highlighted ? "#6B7280" : "var(--th-text-faint)" }}>
-                            {plan.period}
-                          </span>
-                        </div>
-                        <p className="text-xs mt-3 leading-relaxed" style={{ color: plan.highlighted ? "#9CA3AF" : "var(--th-text-muted)" }}>
-                          {plan.desc}
-                        </p>
-                      </div>
-
-                      <ul className="space-y-2.5 pt-2">
-                        {plan.features.map((f) => (
-                          <li key={f} className="flex items-start gap-2.5 text-xs" style={{ color: plan.highlighted ? "#C8CDD5" : "var(--th-text-secondary)" }}>
-                            <CheckCircle size={14} style={{ color: plan.highlighted ? "#0062FF" : "#3DDC84" }} className="shrink-0 mt-0.5" />
-                            <span>{f}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-
-                    <div className="pt-4">
-                      <Link
-                        href={plan.href}
-                        className={cn(
-                          "flex w-full justify-center py-2.5 rounded-xl font-semibold transition-all text-xs",
-                          plan.highlighted ? "bg-[#0062FF] hover:bg-[#004BE6] text-white shadow-lg shadow-[#0062FF]/10" : "btn-secondary"
-                        )}
-                      >
-                        {plan.cta}
-                      </Link>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            );
-          })()}
-
-          <p className="text-center text-[0.7rem] mt-8" style={{ color: "var(--th-text-faint)" }}>
-            All plans include a 14-day free trial. Prices in INR, taxes as applicable. Students allocated a seat by their college get full access at no personal cost.
-          </p>
-        </div>
-      </section>
-
-      {/* CTA Section */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 py-10 text-center">
-        <motion.div
-          initial={false}
-          whileInView={{ opacity: 1, scale: 1 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.4 }}
-          className="max-w-3xl mx-auto space-y-6"
-        >
-          <h2
-            className="text-[2.5rem] font-bold tracking-tight"
-            style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}
-          >
-            Ready to enter the console?
-          </h2>
-          <p className="text-sm max-w-lg mx-auto leading-relaxed" style={{ color: "var(--th-text-muted)" }}>
-            14-day free trial. No credit card required. Cancel anytime.
-            Your first mock interview takes 90 minutes.
-          </p>
-          <div className="flex flex-wrap items-center justify-center gap-4 pt-4">
-            <Link href="/register" className="btn-primary !px-8 !py-3.5 !text-sm !rounded-full shadow-lg shadow-[#0062FF]/10 hover:shadow-xl hover:shadow-[#0062FF]/20 transition-all">
-              Create free account <ArrowRight size={16} />
-            </Link>
-            <Link href="/about" className="btn-secondary !px-8 !py-3.5 !text-sm !rounded-full transition-all" style={{ borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }}>
-              Learn more
-            </Link>
-          </div>
-        </motion.div>
-      </section>
-
-      {/* FAQ Section */}
-      <section id="faqs" className="py-10 border-t border-[var(--th-border)] bg-[var(--th-bg-tertiary)]">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6">
-          <div className="text-center max-w-lg mx-auto mb-16 space-y-2">
-            <span className="label-caption" style={{ color: "var(--th-text-faint)" }}>Got questions?</span>
-            <h2
-              className="text-[2.25rem] font-bold tracking-tight"
-              style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}
-            >
-              Frequently Asked Questions
-            </h2>
-          </div>
-
-          <div className="space-y-4">
-            {FAQS.map((faq, i) => {
-              const isOpen = activeFaqIdx === i;
-              return (
+          {cards.length === 0 ? (
+            <div className="grid gap-6 md:grid-cols-3">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="h-[440px] animate-pulse rounded-2xl border" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }} />
+              ))}
+            </div>
+          ) : (
+            <div className="grid items-stretch gap-6 md:grid-cols-3">
+              {cards.map((p) => (
                 <div
-                  key={i}
-                  className="rounded-xl border transition-all duration-300 overflow-hidden"
+                  key={p.key}
+                  className="relative flex flex-col rounded-2xl border p-6 lg:p-7"
                   style={{
-                    backgroundColor: isOpen ? "var(--th-card-bg)" : "var(--th-surface)",
-                    borderColor: isOpen ? "var(--th-primary)" : "var(--th-card-border)",
-                    boxShadow: isOpen ? "0 4px 20px rgba(0, 98, 255, 0.05)" : "none",
+                    borderColor: p.highlighted ? "var(--th-primary)" : "var(--th-card-border)",
+                    backgroundColor: "var(--th-card-bg)",
+                    boxShadow: p.highlighted ? "0 12px 40px color-mix(in srgb, var(--th-primary) 16%, transparent)" : "none",
                   }}
                 >
-                  <button
-                    onClick={() => setActiveFaqIdx(isOpen ? null : i)}
-                    className="w-full flex items-center justify-between p-5 text-left font-semibold text-sm cursor-pointer transition-colors duration-200"
-                    style={{ color: "var(--th-text-primary)", border: "none", background: "transparent" }}
-                  >
-                    <span>{faq.question}</span>
-                    <motion.div
-                      animate={{ rotate: isOpen ? 180 : 0 }}
-                      transition={{ duration: 0.2 }}
-                      className="shrink-0 ml-4 p-1 rounded-md text-[var(--th-text-muted)]"
+                  {p.highlighted && (
+                    <span
+                      className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-white"
+                      style={{ backgroundColor: "var(--th-primary)" }}
                     >
-                      <ChevronDown size={16} />
-                    </motion.div>
-                  </button>
-
-                  <AnimatePresence initial={false}>
-                    {isOpen && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: "auto", opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.2, ease: "easeInOut" }}
-                      >
-                        <div
-                          className="px-5 pb-5 pt-1 text-xs leading-relaxed"
-                          style={{ color: "var(--th-text-secondary)" }}
-                        >
-                          {faq.answer}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+                      Most popular
+                    </span>
+                  )}
+                  <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--th-text-muted)" }}>{p.name}</div>
+                  <div className="mt-2 flex items-baseline gap-1">
+                    <span className="text-3xl font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
+                      {p.price}
+                    </span>
+                    <span className="text-xs" style={{ color: "var(--th-text-faint)" }}>{p.period}</span>
+                  </div>
+                  <p className="mt-3 text-xs leading-relaxed" style={{ color: "var(--th-text-muted)" }}>{p.desc}</p>
+                  <ul className="mt-5 flex-1 space-y-2.5">
+                    {p.features.map((f) => (
+                      <li key={f} className="flex items-start gap-2.5 text-xs" style={{ color: "var(--th-text-secondary)" }}>
+                        <Check size={14} strokeWidth={2.5} className="mt-0.5 shrink-0" style={{ color: "var(--th-primary)" }} />
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+                  <Link href={p.href} className="mt-6">
+                    <button className={cn("w-full justify-center !rounded-full !py-2.5 !text-xs", p.highlighted ? "btn-primary" : "btn-secondary")}>
+                      {p.cta}
+                    </button>
+                  </Link>
                 </div>
-              );
-            })}
-          </div>
-        </div>
-      </section>
+              ))}
+            </div>
+          )}
 
-      {/* Footer */}
+          <p className="mt-8 text-center text-xs" style={{ color: "var(--th-text-faint)" }}>
+            Prices in INR, taxes as applicable. Students on a college seat get full access at no personal cost.
+          </p>
+        </section>
+
+        {/* ── FAQ ── */}
+        <section id="faqs" className="border-y" style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-bg-secondary)" }}>
+          <div className="mx-auto max-w-3xl px-4 py-14 sm:px-6 sm:py-20">
+            <Reveal className="mx-auto mb-8 max-w-2xl text-center sm:mb-10">
+              <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--th-text-faint)" }}>
+                Questions
+              </span>
+              <h2 className="mt-3 text-3xl font-semibold tracking-tight md:text-4xl" style={{ fontFamily: "var(--font-inter-tight), sans-serif" }}>
+                Good to know before you start.
+              </h2>
+            </Reveal>
+
+            <div className="space-y-3">
+              {FAQS.map((item, i) => {
+                const open = faq === i;
+                return (
+                  <div
+                    key={i}
+                    className="overflow-hidden rounded-xl border transition-colors"
+                    style={{ borderColor: open ? "var(--th-primary)" : "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}
+                  >
+                    <button
+                      onClick={() => setFaq(open ? null : i)}
+                      className="flex w-full items-center justify-between gap-4 p-4 text-left text-sm font-semibold"
+                      style={{ color: "var(--th-text-primary)" }}
+                    >
+                      {item.q}
+                      <ChevronDown
+                        size={16}
+                        className="shrink-0 transition-transform"
+                        style={{ transform: open ? "rotate(180deg)" : "none", color: "var(--th-text-muted)" }}
+                      />
+                    </button>
+                    <AnimatePresence initial={false}>
+                      {open && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.2 }}
+                        >
+                          <p className="px-4 pb-4 text-xs leading-relaxed" style={{ color: "var(--th-text-secondary)" }}>{item.a}</p>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+
+        {/* ── final CTA ── */}
+        <section className="mx-auto max-w-6xl px-4 pb-16 pt-14 sm:px-6 sm:pb-24 sm:pt-20">
+          <Reveal>
+            <div
+              className="relative overflow-hidden rounded-3xl border px-5 py-12 text-center sm:px-12 sm:py-16"
+              style={{ borderColor: "var(--th-card-border)", background: "var(--th-hero-grad)" }}
+            >
+              <Rocket size={22} className="mx-auto mb-4" style={{ color: "var(--th-primary)" }} />
+              <h2 className="mx-auto max-w-xl text-2xl font-semibold tracking-tight md:text-3xl" style={{ fontFamily: "var(--font-inter-tight), sans-serif" }}>
+                Your first mock is free. Take it today.
+              </h2>
+              <p className="mx-auto mt-4 max-w-lg text-sm leading-relaxed" style={{ color: "var(--th-text-secondary)" }}>
+                3 mock interviews, 2 AI evaluations and a PDF report on the house. No card, cancel anytime.
+              </p>
+              <div className="mx-auto mt-8 flex max-w-sm flex-col gap-3 sm:max-w-none sm:flex-row sm:flex-wrap sm:justify-center">
+                <Link href="/register" className="w-full sm:w-auto">
+                  <button className="btn-primary w-full justify-center !rounded-full !px-8 !py-3 !text-sm sm:w-auto">
+                    Create free account <ArrowRight size={16} />
+                  </button>
+                </Link>
+                <Link href="/about" className="w-full sm:w-auto">
+                  <button className="btn-secondary w-full justify-center !rounded-full !px-8 !py-3 !text-sm sm:w-auto">
+                    Learn more
+                  </button>
+                </Link>
+              </div>
+            </div>
+          </Reveal>
+        </section>
+      </main>
+
       <Footer />
     </div>
   );

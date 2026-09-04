@@ -8,10 +8,12 @@ const Organization = require('../models/OrganizationModel');
 const SeatUtilization = require('../models/SeatUtilizationModel');
 const Notification = require('../models/NotificationModel');
 const RoundDetail = require('../models/RoundDetailModel');
+const StudentProfile = require('../models/StudentProfileModel');
 const githubProvider = require("../utils/providers/githubProvider.js")
 const codeforcesProvider = require("../utils/providers/codeforcesProvider.js");
 const hackerrankProvider = require("../utils/providers/hackerrankProvider.js");
 const leetcodeProvider = require("../utils/providers/leetcodeProvider.js");
+const { buildPlatformUpdate } = require('../utils/codingProfiles.js');
 const logger = require('./loggerService');
 const NotificationService = require('./notificationService');
 const { SUBSCRIPTION_PLANS, getPlan } = require('../utils/constants');
@@ -32,32 +34,29 @@ cron.schedule('0 2 * * *', async () => {
     for (const platform of platforms) {
         try {
             const query = {};
-            query[`codingProfiles.${platform}.isVerified`] = true;
-            const users = await User.find(query);
+            query[`externalMetrics.${platform}.isVerified`] = true;
+            const profiles = await StudentProfile.find(query).select(`user externalMetrics.${platform}`);
 
-            for (let user of users) {
-                const profile = user.codingProfiles[platform];
-                if (!profile || !profile.username) continue;
+            for (const profile of profiles) {
+                const p = profile.externalMetrics?.[platform];
+                if (!p || !p.username) continue;
 
-                const username = profile.username;
                 const fetcher = providersMap[platform];
-
                 if (fetcher) {
-                    const freshData = await fetcher(username);
+                    const freshData = await fetcher(p.username);
                     if (freshData) {
-                        const updateData = {};
-                        updateData[`codingProfiles.${platform}.stats`] = freshData.stats;
-                        updateData[`codingProfiles.${platform}.lastSyncedAt`] = new Date();
-
-                        await User.findByIdAndUpdate(user._id, { $set: updateData });
-                        logger.info(`Auto-synced [${platform}] for ${username}`);
+                        await StudentProfile.updateOne(
+                            { _id: profile._id },
+                            { $set: buildPlatformUpdate(platform, freshData) }
+                        );
+                        logger.info(`Auto-synced [${platform}] for ${p.username}`);
                     }
                 }
-                // 2 seconds sleep delay to avoid IP blocking from competitive websites
+                // 2s delay to avoid IP blocking from competitive-programming sites
                 await new Promise(resolve => setTimeout(resolve, 2000));
             }
         } catch (err) {
-            logger.error(` Error in cron processing platform ${platform}:`, err.message);
+            logger.error(`Error in cron processing platform ${platform}: ${err.message}`);
         }
     }
     logger.info('Global Background Sync Finished.');
@@ -294,7 +293,7 @@ cron.schedule('0 3 * * *', async () => {
           type: 'payment_due',
           title: 'Subscription Renewal Payment Due',
           message: `Your ${plan.name} plan subscription renewal payment of INR ${billingAmount} is due. Please complete payment to continue service.`,
-          actionUrl: '/billing',
+          actionUrl: '/dashboard/billing',
           actionText: 'Pay Now',
           priority: 'high',
           metadata: {
@@ -337,7 +336,7 @@ cron.schedule('0 3 * * *', async () => {
         type: 'subscription_expired',
         title: 'Subscription Suspended',
         message: `Your subscription has been suspended due to non-payment. Please complete payment to reactivate.`,
-        actionUrl: '/billing',
+        actionUrl: '/dashboard/billing',
         actionText: 'Retry Payment',
         priority: 'urgent',
         metadata: { subscriptionId: subscription._id }

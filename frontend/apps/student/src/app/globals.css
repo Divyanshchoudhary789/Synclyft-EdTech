@@ -1,3 +1,57 @@
 /* Synclyft design system lives in @synclyft/ui — imported here so every app
    shares one visual language. App-specific overrides can be added below. */
 @import "@synclyft/ui/styles/globals.css";
+
+/* ── Interview workspace theme ──────────────────────────────────────────────
+   The interview runs in its own focused surface with a self-contained palette
+   the candidate can flip between dark and light (scoped to the interview only —
+   it does not touch the rest of the app). Every interview component paints from
+   these `--iv-*` tokens. The `:root` values are the dark defaults so the
+   pre-shell loading screens still have a palette; `data-iv-theme` on the shell
+   overrides per candidate choice. `color-scheme` is only set on the shell, not
+   globally, so the rest of the app's own theming is untouched. */
+:root {
+  --iv-bg: #0b0d10;
+  --iv-panel: #0f1216;
+  --iv-card: #12151a;
+  --iv-elevated: #1b1f26;
+  --iv-editor-bg: #1e1e1e;
+  --iv-border: #2a2f38;
+  --iv-border-strong: #3a404b;
+  --iv-text: #e8eaf0;
+  --iv-text-secondary: #c8cdd5;
+  --iv-text-muted: #9ca3af;
+  --iv-text-faint: #6b7280;
+  --iv-text-faintest: #4a5260;
+  --iv-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+[data-iv-theme="dark"] {
+  color-scheme: dark;
+}
+
+[data-iv-theme="light"] {
+  --iv-bg: #f6f7f9;
+  --iv-panel: #ffffff;
+  --iv-card: #ffffff;
+  --iv-elevated: #eef0f3;
+  --iv-editor-bg: #ffffff;
+  --iv-border: #e4e7ec;
+  --iv-border-strong: #cdd2da;
+  --iv-text: #14161c;
+  --iv-text-secondary: #3b4350;
+  --iv-text-muted: #5c6675;
+  --iv-text-faint: #8b94a2;
+  --iv-text-faintest: #a7afbc;
+  --iv-shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.1);
+  color-scheme: light;
+}
+
+/* Smooth the flip. */
+[data-iv-theme] * {
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+[data-iv-theme] .monaco-editor,
+[data-iv-theme] .monaco-editor * {
+  transition: none;
+}

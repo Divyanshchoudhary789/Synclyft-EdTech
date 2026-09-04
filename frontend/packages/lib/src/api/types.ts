@@ -61,6 +61,57 @@ export interface InterviewSession {
   overallGrade?: string;
 }
 
+export interface CodingSampleTest {
+  id: string;
+  input: string;
+  expectedOutput: string;
+  explanation?: string;
+}
+
+export interface CodingExample {
+  id: string;
+  input: string;
+  output: string;
+  explanation?: string;
+}
+
+export interface CodingQuestion {
+  questionId: string;
+  title: string;
+  problemStatement: string;
+  difficulty: string;
+  topicTags: string[];
+  constraints: string[];
+  examples: CodingExample[];
+  sampleTestCases: CodingSampleTest[];
+  starterCode: Record<string, string>;
+  timeLimitMs: number | null;
+  memoryLimitKb: number | null;
+}
+
+export interface CodingRunCase {
+  id: string;
+  input: string;
+  expectedOutput: string;
+  stdout?: string;
+  stderr?: string;
+  compileOutput?: string;
+  status: string;
+  passed: boolean | null;
+  runtimeMs?: number | null;
+  memoryKb?: number | null;
+}
+
+export interface CodingRunResult {
+  success: boolean;
+  sandboxAvailable: boolean;
+  ran: boolean;
+  passed?: number;
+  total?: number;
+  message?: string;
+  cases: CodingRunCase[];
+}
+
 export interface RoundResult {
   round: RoundType;
   score: number;

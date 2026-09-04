@@ -5,11 +5,12 @@ import { Button } from "@synclyft/ui/components/Button";
 import { Badge } from "@synclyft/ui/components/Badge";
 import { SkeletonBlock } from "@synclyft/ui/components/SkeletonBlock";
 import { api, toApiError } from "@synclyft/lib/api";
-import { authService, notificationService } from "@synclyft/lib/api/services";
+import { authService, collegeAdminService, notificationService } from "@synclyft/lib/api/services";
 import { planLabel } from "@synclyft/lib/utils";
 import { useAuthStore } from "@synclyft/lib/store/auth";
 import toast from "react-hot-toast";
-import { Building2, Shield, KeyRound, Bell } from "lucide-react";
+import { Building2, Shield, KeyRound, Bell, FileCheck2, Upload } from "lucide-react";
+import { PageHeader } from "@/components/PageHeader";
 
 interface Form {
   organizationName: string;
@@ -33,7 +34,8 @@ const EMPTY: Form = {
 export default function OfficerSettingsPage() {
   const { logout } = useAuthStore();
   const [form, setForm] = useState<Form>(EMPTY);
-  const [meta, setMeta] = useState<{ status?: string; subscription?: string; seats?: number }>({});
+  const [meta, setMeta] = useState<{ status?: string; subscription?: string; seats?: number; isVerified?: boolean; docCount?: number }>({});
+  const [reloadKey, setReloadKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -64,6 +66,8 @@ export default function OfficerSettingsPage() {
           status: String(org.status ?? ctx.status ?? ""),
           subscription: planLabel(sub.planType as string),
           seats: Number(seatMgmt.totalSeatsAllocated ?? 0),
+          isVerified: Boolean(org.isVerified),
+          docCount: Array.isArray(org.verificationDocuments) ? org.verificationDocuments.length : 0,
         });
       } catch (err) {
         toast.error(toApiError(err).message);
@@ -71,7 +75,7 @@ export default function OfficerSettingsPage() {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [reloadKey]);
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -114,13 +118,13 @@ export default function OfficerSettingsPage() {
   );
 
   return (
-    <div className="p-6 md:p-8 max-w-3xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-lg font-semibold flex items-center gap-2" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
-          <Building2 size={18} /> Organization settings
-        </h1>
-        <p className="text-xs" style={{ color: "var(--th-text-faint)" }}>Your institute profile and placement-cell contact</p>
-      </div>
+    <div className="p-5 sm:p-6 md:p-8 max-w-3xl mx-auto space-y-6">
+      <PageHeader
+        eyebrow="Account"
+        icon={<Building2 size={18} />}
+        title="Organization settings"
+        subtitle="Your institute profile and placement-cell contact"
+      />
 
       {loading ? (
         <div className="space-y-3"><SkeletonBlock height="h-9" /><SkeletonBlock height="h-9" /><SkeletonBlock height="h-9" /></div>
@@ -129,7 +133,7 @@ export default function OfficerSettingsPage() {
           <div className="rounded-2xl border p-5 flex flex-wrap gap-4 text-sm" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
             <div>
               <p className="text-[10px] uppercase font-bold" style={{ color: "var(--th-text-faint)" }}>Status</p>
-              <Badge variant={meta.status === "verified" || meta.status === "Approved" ? "verdant" : "amber"}>{meta.status || "pending"}</Badge>
+              <Badge variant={meta.isVerified ? "verdant" : "amber"}>{meta.isVerified ? "Verified" : (meta.status || "pending verification").replace(/_/g, " ")}</Badge>
             </div>
             <div>
               <p className="text-[10px] uppercase font-bold" style={{ color: "var(--th-text-faint)" }}>Plan</p>
@@ -175,11 +179,77 @@ export default function OfficerSettingsPage() {
             </div>
           </form>
 
+          {!meta.isVerified && (
+            <VerificationCard docCount={meta.docCount ?? 0} onUploaded={() => setReloadKey((k) => k + 1)} />
+          )}
           <NotificationPrefsCard />
           <PasswordCard />
         </>
       )}
     </div>
+  );
+}
+
+const DOC_TYPES = [
+  { value: "registration_certificate", label: "Registration / affiliation certificate" },
+  { value: "gst_certificate", label: "GST certificate" },
+  { value: "pan_certificate", label: "PAN certificate" },
+  { value: "udyam_aadhar", label: "Udyam / Aadhaar" },
+];
+
+function VerificationCard({ docCount, onUploaded }: { docCount: number; onUploaded: () => void }) {
+  const [docType, setDocType] = useState(DOC_TYPES[0].value);
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!file) return toast.error("Choose a file to upload");
+    if (file.size > 3 * 1024 * 1024) return toast.error("File must be under 3MB");
+    setUploading(true);
+    try {
+      await collegeAdminService.addVerificationDocument(file, docType);
+      toast.success("Document uploaded — our team will review it shortly");
+      setFile(null);
+      onUploaded();
+    } catch (err) {
+      toast.error(toApiError(err).message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="rounded-2xl border p-6 space-y-4" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
+      <div>
+        <p className="text-sm font-semibold flex items-center gap-2" style={{ color: "var(--th-text-primary)" }}>
+          <FileCheck2 size={15} /> Institute verification
+        </p>
+        <p className="text-[11px] mt-1" style={{ color: "var(--th-text-faint)" }}>
+          {docCount > 0
+            ? `${docCount} document${docCount === 1 ? "" : "s"} submitted · pending review. You can add more.`
+            : "Upload an official document so the Synclyft team can verify your institute and activate all features."}
+        </p>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <label className="text-[10px] uppercase font-bold" style={{ color: "var(--th-text-faint)" }}>Document type</label>
+          <select value={docType} onChange={(e) => setDocType(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg border text-xs" style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }}>
+            {DOC_TYPES.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+          </select>
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-[10px] uppercase font-bold" style={{ color: "var(--th-text-faint)" }}>File (JPG / PNG, max 3MB)</label>
+          <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            className="w-full text-xs file:mr-3 file:rounded-md file:border-0 file:bg-[color:var(--th-primary)] file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white"
+            style={{ color: "var(--th-text-secondary)" }} />
+        </div>
+      </div>
+      <div className="flex justify-end">
+        <Button type="submit" loading={uploading} icon={<Upload size={13} />}>Upload document</Button>
+      </div>
+    </form>
   );
 }
 

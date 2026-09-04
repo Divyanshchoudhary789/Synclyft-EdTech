@@ -146,11 +146,11 @@ InterviewAnalyticsSchema.index({ proctoringRiskScore: 1, isDisqualified: 1 });
 InterviewAnalyticsSchema.index({ overallScore: 1 });
 InterviewAnalyticsSchema.index({ completedAt: 1 });
 
-InterviewAnalyticsSchema.pre('save', function(next) {
+// Mongoose 9 dropped the `next` callback in hooks — a sync hook just returns.
+InterviewAnalyticsSchema.pre('save', function() {
     if (this.completedAt && this.startedAt) {
         this.totalDurationSeconds = Math.floor((this.completedAt - this.startedAt) / 1000);
     }
-    next();
 });
 
 InterviewAnalyticsSchema.virtual('formattedDuration').get(function() {

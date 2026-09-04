@@ -6,8 +6,9 @@ import { toApiError } from "@synclyft/lib/api";
 import { Button } from "@synclyft/ui/components/Button";
 import { Badge } from "@synclyft/ui/components/Badge";
 import { SkeletonBlock } from "@synclyft/ui/components/SkeletonBlock";
-import { Plus, Megaphone, X, AlertCircle, Users, BarChart3, Send, Loader2 } from "lucide-react";
+import { Plus, Megaphone, X, AlertCircle, Users, BarChart3, Send, Loader2, Pencil, Ban, Check } from "lucide-react";
 import toast from "react-hot-toast";
+import { PageHeader } from "@/components/PageHeader";
 
 interface Campaign {
   _id: string;
@@ -28,9 +29,12 @@ const ROUNDS = [
   { key: "hasHr", label: "HR" },
 ];
 
+interface RosterStudent { id: string; name: string; email: string }
+
 export default function CampaignsPage() {
   const [items, setItems] = useState<Campaign[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
+  const [roster, setRoster] = useState<RosterStudent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modal, setModal] = useState(false);
@@ -39,17 +43,25 @@ export default function CampaignsPage() {
   const [rounds, setRounds] = useState<Record<string, boolean>>({ hasAptitude: true, hasCoding: true, hasTechnical: false, hasHr: false });
   const [assignFor, setAssignFor] = useState<Campaign | null>(null);
   const [resultsFor, setResultsFor] = useState<Campaign | null>(null);
+  const [editFor, setEditFor] = useState<Campaign | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [c, b] = await Promise.all([
+      const [c, b, s] = await Promise.all([
         collegeAdminService.campaigns(),
         collegeAdminService.batches({ limit: 100 }).catch(() => [] as Record<string, unknown>[]),
+        collegeAdminService.students({ limit: 500 }).catch(() => ({ items: [] as Record<string, unknown>[] })),
       ]);
       setItems(c as unknown as Campaign[]);
       setBatches((b as unknown as Batch[]).filter((x) => x.status !== "archived"));
+      setRoster(
+        s.items.map((p) => {
+          const u = (p.user ?? {}) as Record<string, unknown>;
+          return { id: String(u._id ?? p._id ?? ""), name: String(u.name ?? "—"), email: String(u.email ?? "") };
+        })
+      );
     } catch (err) {
       setError(toApiError(err).message);
     } finally {
@@ -90,14 +102,13 @@ export default function CampaignsPage() {
   };
 
   return (
-    <div className="p-6 md:p-8 space-y-6">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-lg font-semibold" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>Campaigns</h1>
-          <p className="text-xs" style={{ color: "var(--th-text-faint)" }}>Company-style mock drives — create, assign to batches, then review results</p>
-        </div>
-        <Button icon={<Plus size={14} />} onClick={() => setModal(true)}>New campaign</Button>
-      </div>
+    <div className="p-5 sm:p-6 md:p-8 space-y-6">
+      <PageHeader
+        eyebrow="Drives"
+        title="Campaigns"
+        subtitle="Company-style mock drives — create, assign to batches, then review results"
+        actions={<Button icon={<Plus size={14} />} onClick={() => setModal(true)}>New campaign</Button>}
+      />
 
       {error && (
         <div className="flex items-center gap-2 rounded-xl border p-4 text-sm" style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-card-bg)", color: "var(--th-text-secondary)" }}>
@@ -137,7 +148,7 @@ export default function CampaignsPage() {
                     <span key={r.key} className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/5 text-blue-600 dark:text-blue-400 border border-blue-500/15">{r.label}</span>
                   ))}
                 </div>
-                <div className="mt-4 flex gap-2">
+                <div className="mt-4 flex flex-wrap gap-2">
                   <button onClick={() => setAssignFor(c)}
                     className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded border font-semibold" style={{ borderColor: "var(--th-primary)", color: "var(--th-primary)" }}>
                     <Send size={11} /> Assign to batches
@@ -145,6 +156,10 @@ export default function CampaignsPage() {
                   <button onClick={() => setResultsFor(c)}
                     className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded border" style={{ borderColor: "var(--th-border)", color: "var(--th-text-secondary)" }}>
                     <BarChart3 size={11} /> Results
+                  </button>
+                  <button onClick={() => setEditFor(c)}
+                    className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded border" style={{ borderColor: "var(--th-border)", color: "var(--th-text-secondary)" }}>
+                    <Pencil size={11} /> Edit
                   </button>
                 </div>
               </div>
@@ -203,27 +218,40 @@ export default function CampaignsPage() {
       )}
 
       {assignFor && (
-        <AssignModal campaign={assignFor} batches={batches} onClose={() => setAssignFor(null)} onDone={() => { setAssignFor(null); load(); }} />
+        <AssignModal campaign={assignFor} batches={batches} roster={roster} onClose={() => setAssignFor(null)} onDone={() => { setAssignFor(null); load(); }} />
       )}
       {resultsFor && <ResultsModal campaign={resultsFor} onClose={() => setResultsFor(null)} />}
+      {editFor && <EditModal campaign={editFor} onClose={() => setEditFor(null)} onDone={() => { setEditFor(null); load(); }} />}
     </div>
   );
 }
 
-function AssignModal({
-  campaign, batches, onClose, onDone,
-}: { campaign: Campaign; batches: Batch[]; onClose: () => void; onDone: () => void }) {
-  const already = new Set((campaign.assignedBatches ?? []).filter((a) => (a.status ?? "active") === "active").map((a) => String(a.batch)));
-  const [selected, setSelected] = useState<Set<string>>(new Set(already));
-  const [notify, setNotify] = useState(true);
+function EditModal({ campaign, onClose, onDone }: { campaign: Campaign; onClose: () => void; onDone: () => void }) {
+  const [form, setForm] = useState({
+    title: campaign.title ?? "",
+    description: campaign.description ?? "",
+    deadline: campaign.deadline ? new Date(campaign.deadline).toISOString().slice(0, 10) : "",
+  });
+  const [rounds, setRounds] = useState<Record<string, boolean>>({
+    hasAptitude: campaign.config?.hasAptitude ?? true,
+    hasCoding: campaign.config?.hasCoding ?? true,
+    hasTechnical: campaign.config?.hasTechnical ?? false,
+    hasHr: campaign.config?.hasHr ?? false,
+  });
   const [saving, setSaving] = useState(false);
 
-  const submit = async () => {
-    if (selected.size === 0) return toast.error("Select at least one batch");
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.title.trim()) return toast.error("Title is required");
     setSaving(true);
     try {
-      await collegeAdminService.assignCampaignToBatches(campaign._id, [...selected]);
-      toast.success("Campaign assigned");
+      await collegeAdminService.updateCampaign(campaign._id, {
+        title: form.title.trim(),
+        description: form.description || undefined,
+        deadline: form.deadline || undefined,
+        config: rounds,
+      });
+      toast.success("Campaign updated");
       onDone();
     } catch (err) {
       toast.error(toApiError(err).message);
@@ -234,29 +262,177 @@ function AssignModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl border p-6 relative" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
+      <form onSubmit={save} className="w-full max-w-md rounded-2xl border p-6 space-y-4 relative"
+        style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
+        <button type="button" onClick={onClose} className="absolute right-4 top-4" style={{ color: "var(--th-text-faint)" }}><X size={18} /></button>
+        <h3 className="text-sm font-bold" style={{ color: "var(--th-text-primary)" }}>Edit campaign</h3>
+        <div className="space-y-1">
+          <label className="text-[10px] uppercase font-bold" style={{ color: "var(--th-text-faint)" }}>Title</label>
+          <input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+            className="w-full px-3 py-2 rounded-lg border text-xs" style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }} />
+        </div>
+        <div className="space-y-1">
+          <label className="text-[10px] uppercase font-bold" style={{ color: "var(--th-text-faint)" }}>Description</label>
+          <textarea rows={2} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+            className="w-full px-3 py-2 rounded-lg border text-xs resize-none" style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }} />
+        </div>
+        <div className="space-y-1">
+          <label className="text-[10px] uppercase font-bold" style={{ color: "var(--th-text-faint)" }}>Deadline</label>
+          <input type="date" value={form.deadline} onChange={(e) => setForm((f) => ({ ...f, deadline: e.target.value }))}
+            className="w-full px-3 py-2 rounded-lg border text-xs" style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }} />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-[10px] uppercase font-bold" style={{ color: "var(--th-text-faint)" }}>Rounds</label>
+          <div className="flex flex-wrap gap-2">
+            {ROUNDS.map((r) => (
+              <button key={r.key} type="button" onClick={() => setRounds((s) => ({ ...s, [r.key]: !s[r.key] }))}
+                className="px-3 py-1.5 rounded-full text-xs font-semibold border"
+                style={{
+                  backgroundColor: rounds[r.key] ? "var(--th-primary)" : "transparent",
+                  color: rounds[r.key] ? "#fff" : "var(--th-text-secondary)",
+                  borderColor: rounds[r.key] ? "var(--th-primary)" : "var(--th-border)",
+                }}>
+                {r.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button type="submit" loading={saving}>Save</Button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function AssignModal({
+  campaign, batches, roster, onClose, onDone,
+}: { campaign: Campaign; batches: Batch[]; roster: RosterStudent[]; onClose: () => void; onDone: () => void }) {
+  const activeAssignments = (campaign.assignedBatches ?? []).filter((a) => (a.status ?? "active") === "active");
+  const already = new Set(activeAssignments.map((a) => String(a.batch)));
+  const [mode, setMode] = useState<"batches" | "students">("batches");
+  const [selected, setSelected] = useState<Set<string>>(new Set(already));
+  const [students, setStudents] = useState<Set<string>>(new Set());
+  const [q, setQ] = useState("");
+  const [notify, setNotify] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [revoking, setRevoking] = useState<string | null>(null);
+  const batchName = (id: string) => batches.find((b) => b._id === id)?.batchName ?? "Batch";
+
+  const filteredRoster = roster.filter((r) =>
+    !q || r.name.toLowerCase().includes(q.toLowerCase()) || r.email.toLowerCase().includes(q.toLowerCase()));
+
+  const revoke = async (batchId: string) => {
+    if (!confirm(`Revoke this campaign from ${batchName(batchId)}? Students will be notified.`)) return;
+    setRevoking(batchId);
+    try {
+      await collegeAdminService.revokeCampaignAssignment(campaign._id, batchId);
+      toast.success("Assignment revoked");
+      onDone();
+    } catch (err) {
+      toast.error(toApiError(err).message);
+    } finally {
+      setRevoking(null);
+    }
+  };
+
+  const submit = async () => {
+    setSaving(true);
+    try {
+      if (mode === "batches") {
+        if (selected.size === 0) { setSaving(false); return toast.error("Select at least one batch"); }
+        await collegeAdminService.assignCampaignToBatches(campaign._id, [...selected], notify);
+      } else {
+        if (students.size === 0) { setSaving(false); return toast.error("Select at least one student"); }
+        await collegeAdminService.assignCampaignToStudents(campaign._id, [...students], notify);
+      }
+      toast.success(notify ? "Campaign assigned · students notified" : "Campaign assigned");
+      onDone();
+    } catch (err) {
+      toast.error(toApiError(err).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-2xl border p-6 relative max-h-[88vh] overflow-y-auto" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
         <button onClick={onClose} className="absolute right-4 top-4" style={{ color: "var(--th-text-faint)" }}><X size={18} /></button>
         <h3 className="text-sm font-bold mb-1" style={{ color: "var(--th-text-primary)" }}>Assign · {campaign.title}</h3>
-        <p className="text-xs mb-4" style={{ color: "var(--th-text-faint)" }}>Students in the selected batches get this campaign in their portal.</p>
 
-        {batches.length === 0 ? (
-          <p className="text-xs py-6 text-center" style={{ color: "var(--th-text-faint)" }}>Create a batch first.</p>
+        <div className="inline-flex rounded-lg border p-0.5 my-3" style={{ borderColor: "var(--th-border)" }}>
+          {(["batches", "students"] as const).map((m) => (
+            <button key={m} onClick={() => setMode(m)}
+              className="px-3 py-1 rounded text-xs font-semibold capitalize transition-colors"
+              style={{ backgroundColor: mode === m ? "var(--th-primary)" : "transparent", color: mode === m ? "#fff" : "var(--th-text-secondary)" }}>
+              {m === "batches" ? "Whole batches" : "Specific students"}
+            </button>
+          ))}
+        </div>
+
+        {mode === "batches" ? (
+          batches.length === 0 ? (
+            <p className="text-xs py-6 text-center" style={{ color: "var(--th-text-faint)" }}>Create a batch first.</p>
+          ) : (
+            <div className="space-y-1.5 max-h-64 overflow-y-auto">
+              {batches.map((b) => {
+                const on = selected.has(b._id);
+                return (
+                  <button key={b._id} onClick={() => setSelected((s) => { const n = new Set(s); n.has(b._id) ? n.delete(b._id) : n.add(b._id); return n; })}
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg border text-left text-xs"
+                    style={{ borderColor: on ? "var(--th-primary)" : "var(--th-border)", backgroundColor: on ? "color-mix(in srgb, var(--th-primary) 8%, transparent)" : "transparent" }}>
+                    <span className="w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0" style={{ borderColor: on ? "var(--th-primary)" : "var(--th-border-strong)", backgroundColor: on ? "var(--th-primary)" : "transparent" }}>
+                      {on && <Check size={10} className="text-white" strokeWidth={3} />}
+                    </span>
+                    <span className="flex-1 min-w-0 truncate" style={{ color: "var(--th-text-primary)" }}>{b.batchName}</span>
+                    <span style={{ color: "var(--th-text-faint)" }}>{b.department} · {b.graduationYear}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )
         ) : (
-          <div className="space-y-1.5 max-h-64 overflow-y-auto">
-            {batches.map((b) => {
-              const on = selected.has(b._id);
-              return (
-                <button key={b._id} onClick={() => setSelected((s) => { const n = new Set(s); n.has(b._id) ? n.delete(b._id) : n.add(b._id); return n; })}
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-lg border text-left text-xs"
-                  style={{ borderColor: on ? "var(--th-primary)" : "var(--th-border)", backgroundColor: on ? "color-mix(in srgb, var(--th-primary) 8%, transparent)" : "transparent" }}>
-                  <span className="w-3.5 h-3.5 rounded border flex items-center justify-center" style={{ borderColor: on ? "var(--th-primary)" : "var(--th-border-strong)", backgroundColor: on ? "var(--th-primary)" : "transparent" }}>
-                    {on && <span className="text-white text-[9px]">✓</span>}
-                  </span>
-                  <span className="flex-1 min-w-0 truncate" style={{ color: "var(--th-text-primary)" }}>{b.batchName}</span>
-                  <span style={{ color: "var(--th-text-faint)" }}>{b.department} · {b.graduationYear}</span>
-                </button>
-              );
-            })}
+          <>
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search students…"
+              className="w-full px-3 py-1.5 rounded-lg border text-xs mb-2" style={{ backgroundColor: "var(--th-input-bg)", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }} />
+            <p className="text-[10px] mb-1.5" style={{ color: "var(--th-text-faint)" }}>{students.size} selected</p>
+            <div className="space-y-1 max-h-56 overflow-y-auto">
+              {filteredRoster.slice(0, 100).map((r) => {
+                const on = students.has(r.id);
+                return (
+                  <button key={r.id} onClick={() => setStudents((s) => { const n = new Set(s); n.has(r.id) ? n.delete(r.id) : n.add(r.id); return n; })}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg border text-left text-xs"
+                    style={{ borderColor: on ? "var(--th-primary)" : "var(--th-border)", backgroundColor: on ? "color-mix(in srgb, var(--th-primary) 8%, transparent)" : "transparent" }}>
+                    <span className="w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0" style={{ borderColor: on ? "var(--th-primary)" : "var(--th-border-strong)", backgroundColor: on ? "var(--th-primary)" : "transparent" }}>
+                      {on && <Check size={9} className="text-white" strokeWidth={3} />}
+                    </span>
+                    <span className="flex-1 min-w-0 truncate" style={{ color: "var(--th-text-primary)" }}>{r.name}</span>
+                    <span className="truncate max-w-[45%]" style={{ color: "var(--th-text-faint)" }}>{r.email}</span>
+                  </button>
+                );
+              })}
+              {filteredRoster.length === 0 && <p className="text-xs py-4 text-center" style={{ color: "var(--th-text-faint)" }}>No students match.</p>}
+            </div>
+          </>
+        )}
+
+        {mode === "batches" && activeAssignments.length > 0 && (
+          <div className="mt-4">
+            <p className="text-[10px] uppercase font-bold mb-1.5" style={{ color: "var(--th-text-faint)" }}>Currently assigned</p>
+            <div className="space-y-1">
+              {activeAssignments.map((a) => (
+                <div key={String(a.batch)} className="flex items-center gap-2 text-xs rounded-lg border px-3 py-1.5" style={{ borderColor: "var(--th-border)" }}>
+                  <span className="flex-1 min-w-0 truncate" style={{ color: "var(--th-text-secondary)" }}>{batchName(String(a.batch))}</span>
+                  {a.studentCount != null && <span style={{ color: "var(--th-text-faint)" }}>{a.studentCount} students</span>}
+                  <button onClick={() => revoke(String(a.batch))} disabled={revoking === String(a.batch)}
+                    className="flex items-center gap-1 text-rose-500 disabled:opacity-50" title="Revoke">
+                    {revoking === String(a.batch) ? <Loader2 size={11} className="animate-spin" /> : <Ban size={11} />}
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -266,7 +442,7 @@ function AssignModal({
 
         <div className="flex justify-end gap-2 pt-4">
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button loading={saving} onClick={submit} disabled={batches.length === 0}>Assign</Button>
+          <Button loading={saving} onClick={submit}>Assign</Button>
         </div>
       </div>
     </div>

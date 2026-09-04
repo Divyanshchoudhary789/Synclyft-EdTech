@@ -174,10 +174,12 @@ export interface AnalyticsDashboardPayload {
 export interface AppNotification {
   _id: string;
   recipient: string;
+  recipientRole?: "student" | "college-admin" | "super-admin";
   title?: string;
   message: string;
+  description?: string;
   type?: string;
-  priority?: "low" | "medium" | "high";
+  priority?: "low" | "normal" | "high" | "urgent";
   status: "unread" | "read" | "archived" | "deleted";
   actionUrl?: string;
   actionText?: string;

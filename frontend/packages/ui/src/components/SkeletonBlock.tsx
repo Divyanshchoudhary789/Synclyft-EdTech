@@ -15,13 +15,17 @@ export function SkeletonBlock({ className = "", height = "h-4", width = "w-full"
   );
 }
 
+/**
+ * KPI-card-shaped placeholder: a short label line, a big value line and a hint
+ * line — mirrors the real stat cards so nothing jumps on load. Pass a height
+ * class (e.g. `h-28`) to match the surrounding grid.
+ */
 export function SkeletonCard({ className }: { className?: string }) {
   return (
-    <div className={cn("card-light p-5 space-y-3", className)}>
-      <SkeletonBlock height="h-4" width="w-1/3" />
-      <SkeletonBlock height="h-8" width="w-2/3" />
-      <SkeletonBlock height="h-4" width="w-full" />
-      <SkeletonBlock height="h-4" width="w-5/6" />
+    <div className={cn("card-light flex flex-col justify-center gap-2.5 p-5", className)} aria-hidden="true">
+      <SkeletonBlock height="h-3" width="w-1/2" />
+      <SkeletonBlock height="h-7" width="w-2/5" />
+      <SkeletonBlock height="h-2.5" width="w-4/5" />
     </div>
   );
 }

@@ -9,6 +9,7 @@ import { Button } from "@synclyft/ui/components/Button";
 import { SkeletonBlock } from "@synclyft/ui/components/SkeletonBlock";
 import { Search, AlertCircle, GraduationCap, Ban, RotateCcw } from "lucide-react";
 import toast from "react-hot-toast";
+import { PageHeader } from "@/components/PageHeader";
 
 interface Student {
   _id: string;
@@ -82,25 +83,26 @@ export default function AdminStudentsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>Students</h1>
-          <p className="text-xs" style={{ color: "var(--th-text-faint)" }}>{total} students across every institution</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: "var(--th-text-faint)" }} />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name, email, institute…"
-              className="pl-8 pr-3 py-1.5 rounded-lg border text-xs w-60"
-              style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }} />
+      <PageHeader
+        eyebrow="Directory"
+        title="Students"
+        subtitle={`${total} students across every institution`}
+        actions={
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            <div className="relative min-w-0 flex-1 sm:w-60 sm:flex-none">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: "var(--th-text-faint)" }} />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name, email, institute…"
+                className="w-full rounded-lg border py-2 pl-8 pr-3 text-xs"
+                style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }} />
+            </div>
+            <select value={status} onChange={(e) => setStatus(e.target.value)}
+              className="rounded-lg border px-2 py-2 text-xs"
+              style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }}>
+              {["", "Approved", "Suspended", "Pending"].map((s) => <option key={s} value={s}>{s || "All statuses"}</option>)}
+            </select>
           </div>
-          <select value={status} onChange={(e) => setStatus(e.target.value)}
-            className="px-2 py-1.5 rounded-lg border text-xs"
-            style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }}>
-            {["", "Approved", "Suspended", "Pending"].map((s) => <option key={s} value={s}>{s || "All statuses"}</option>)}
-          </select>
-        </div>
-      </div>
+        }
+      />
 
       {error && (
         <div className="flex items-center gap-2 rounded-xl border p-4 text-sm" style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-card-bg)", color: "var(--th-text-secondary)" }}>

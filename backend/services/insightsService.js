@@ -16,97 +16,76 @@ const { GoogleGenAI } = require('@google/genai');
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 
+// Single source of truth: the placement-score engine keeps
+// `profile.placementReadinessScore` fresh after every completed interview.
 const computeReadinessScore = async (studentId) => {
-    const profile = await StudentProfile.findOne({ user: studentId });
-    if (!profile) return 0;
-
-    const scores = [
-        profile.placementReadinessScore || 0,
-        profile.techScore || 0,
-        profile.aptitudeScore || 0,
-        profile.codingScore || 0,
-        profile.communicationScore || 0,
-        profile.atsScore || 0
-    ];
-
-    const profileScore = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
-
-
-    const sessions = await InterviewSession.find({ student: studentId, status: 'completed' });
-    const sessionCount = sessions.length;
-    const avgScore = sessionCount > 0
-        ? Math.round(sessions.reduce((sum, s) => sum + (s.finalCompositeScore || 0), 0) / sessionCount)
-        : 0;
-
-
-    const composite = Math.round((profileScore * 0.55) + (avgScore * 0.45));
-    return Math.max(0, Math.min(100, composite));
+    const profile = await StudentProfile.findOne({ user: studentId }).select('placementReadinessScore').lean();
+    return Math.max(0, Math.min(100, Math.round(profile?.placementReadinessScore || 0)));
 };
 
 
 const getNextScheduledMock = async (studentId) => {
-    const upcoming = await InterviewSession.findOne({
+    // A genuinely in-progress interview started in the last 24h → offer to resume.
+    const resumable = await InterviewSession.findOne({
         student: studentId,
-        status: 'initialized'
+        status: { $in: ['initialized', 'ongoing'] },
+        createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
     })
-    .sort({ createdAt: -1 })
-    .populate('campaign', 'title deadline companyTemplateDetails.role')
-    .lean();
+        .sort({ createdAt: -1 })
+        .lean();
 
-    if (!upcoming) {
-        const student = await User.findById(studentId).select('organization').lean();
-        const studentProfile = await StudentProfile.findOne({ user: studentId }).select('branch graduationYear targetRole').lean();
-
-        let campaignQuery = {
-            isActive: true,
-            deadline: { $gte: new Date() }
+    if (resumable) {
+        return {
+            date: resumable.startedAt || resumable.createdAt,
+            targetRole: resumable.targetRole,
+            jobDescription: resumable.jobDescription,
+            isEstimated: false,
+            resumable: true,
         };
+    }
 
-        if (student?.organization) {
-            const organization = await OrganizationModel.findOne({ organizationName: student.organization }).select('_id').lean();
+    // Otherwise, the next assigned campaign with a future deadline (a suggestion).
+    const student = await User.findById(studentId).select('organization').lean();
+    const studentProfile = await StudentProfile.findOne({ user: studentId }).select('branch graduationYear targetRole').lean();
 
-            if (organization) {
-                const studentBatches = await PlacementBatchModel.find({
-                    organization: organization._id
-                }).select('_id').lean();
-                const batchIds = studentBatches.map(b => b._id);
+    const campaignQuery = {
+        isActive: true,
+        deadline: { $gte: new Date() },
+    };
 
-                if (batchIds.length > 0) {
-                    campaignQuery['assignedBatches.batch'] = { $in: batchIds };
-                    campaignQuery['assignedBatches.status'] = 'active';
-                }
+    if (student?.organization) {
+        const organization = await OrganizationModel.findOne({ organizationName: student.organization }).select('_id').lean();
+        if (organization) {
+            const studentBatches = await PlacementBatchModel.find({ organization: organization._id }).select('_id').lean();
+            const batchIds = studentBatches.map(b => b._id);
+            if (batchIds.length > 0) {
+                campaignQuery['assignedBatches.batch'] = { $in: batchIds };
+                campaignQuery['assignedBatches.status'] = 'active';
             }
         }
-
-        if (studentProfile?.targetRole) {
-            campaignQuery.$or = [
-                { 'companyTemplateDetails.role': { $regex: studentProfile.targetRole, $options: 'i' } },
-                { 'assessmentTypes.type': { $in: ['aptitude', 'coding', 'technical'] } }
-            ];
-        }
-
-        const latestCampaign = await Campaign.findOne(campaignQuery)
-            .sort({ deadline: 1 })
-            .select('title deadline companyTemplateDetails')
-            .lean();
-
-        if (latestCampaign) {
-            return {
-                date: latestCampaign.deadline,
-                targetRole: latestCampaign.companyTemplateDetails?.role || latestCampaign.title,
-                title: latestCampaign.title,
-                isEstimated: true
-            };
-        }
-        return null;
     }
 
-    return {
-        date: upcoming.startedAt || upcoming.createdAt,
-        targetRole: upcoming.targetRole,
-        jobDescription: upcoming.jobDescription,
-        isEstimated: false
+    if (studentProfile?.targetRole) {
+        campaignQuery.$or = [
+            { 'companyTemplateDetails.role': { $regex: studentProfile.targetRole, $options: 'i' } },
+            { 'assessmentTypes.type': { $in: ['aptitude', 'coding', 'technical'] } },
+        ];
     }
+
+    const latestCampaign = await Campaign.findOne(campaignQuery)
+        .sort({ deadline: 1 })
+        .select('title deadline companyTemplateDetails')
+        .lean();
+
+    if (latestCampaign) {
+        return {
+            date: latestCampaign.deadline,
+            targetRole: latestCampaign.companyTemplateDetails?.role || latestCampaign.title,
+            title: latestCampaign.title,
+            isEstimated: true,
+        };
+    }
+    return null;
 };
 
 
@@ -119,26 +98,32 @@ const roundTypeDisplayMap = {
 
 
 const buildRadarData = (session) => {
-    const roundScores = {};
-
+    // Prefer the per-round breakdown; fall back to skill scores only when a
+    // session has no round analytics at all.
     if (session.roundAnalytics && session.roundAnalytics.length > 0) {
+        const order = ['aptitude', 'coding', 'technical', 'hr'];
+        const byType = {};
         session.roundAnalytics.forEach(ra => {
-            roundScores[ra.roundType] = Math.round((ra.totalScore / ra.maxPossibleScore) * 100);
+            const max = ra.maxPossibleScore || 100;
+            byType[ra.roundType] = Math.max(0, Math.min(100, Math.round((ra.totalScore / max) * 100)));
         });
+        const present = order.filter(rt => byType[rt] !== undefined);
+        return {
+            labels: present.map(rt => roundTypeDisplayMap[rt] || rt),
+            data: present.map(rt => byType[rt]),
+        };
     }
 
     if (session.skillScores) {
-        Object.entries(session.skillScores).forEach(([key, val]) => {
-            if (!roundScores[key] && val !== undefined) {
-                roundScores[key] = val;
-            }
-        });
+        const map = { communication: 'Communication', problemSolving: 'Problem Solving', technical: 'Technical', coding: 'Coding' };
+        const entries = Object.entries(session.skillScores).filter(([, v]) => typeof v === 'number');
+        return {
+            labels: entries.map(([k]) => map[k] || k),
+            data: entries.map(([, v]) => Math.round(v)),
+        };
     }
 
-    const labels = Object.keys(roundScores).map(k => roundTypeDisplayMap[k] || k.charAt(0).toUpperCase() + k.slice(1));
-    const data = Object.values(roundScores);
-
-    return { labels, data };
+    return { labels: [], data: [] };
 };
 
 
@@ -157,43 +142,71 @@ const buildLineData = async (studentId) => {
 
 
 const buildBarData = async (studentId) => {
-    const latestSession = await InterviewSession.findOne({ student: studentId })
-        .sort({ createdAt: -1 })
-        .lean();
-
     const profile = await StudentProfile.findOne({ user: studentId }).lean();
+    const b = profile?.scoreBreakdown || {};
 
+    // Real competency breakdown from the placement-score engine.
     const competencyScores = {
-        'Technical': profile?.techScore || 0,
-        'Aptitude': profile?.aptitudeScore || 0,
-        'Coding': profile?.codingScore || 0,
-        'Communication': profile?.communicationScore || 0,
-        'ATS Score': profile?.atsScore || 0,
-        'Readiness': profile?.placementReadinessScore || 0
+        'Academics': Math.round(b.academicPerformance || 0),
+        'Coding': Math.round(b.codingPerformance || 0),
+        'Aptitude': Math.round(b.aptitudePerformance || 0),
+        'Communication': Math.round(b.communicationSkills || 0),
+        'Mock Interviews': Math.round(b.mockInterviewPerformance || 0),
+        'Projects': Math.round(b.projectsPortfolio || 0),
+        'ATS': Math.round(profile?.atsScore || 0),
     };
 
     return {
         labels: Object.keys(competencyScores),
-        data: Object.values(competencyScores)
+        data: Object.values(competencyScores),
     };
 };
 
 
+// Real "days active" streak — consecutive calendar days (ending today or
+// yesterday) on which the student did something on the platform: ran an
+// interview, analysed a résumé, or generated a study plan.
+const computeActiveStreak = async (studentId) => {
+    const ResumeAnalysis = require('../models/ResumeAnalysisModel.js');
+    const oid = new mongoose.Types.ObjectId(studentId);
+    const since = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000);
+
+    const [s1, s2, s3] = await Promise.all([
+        InterviewSession.find({ student: oid, createdAt: { $gte: since } }).select('createdAt').lean(),
+        ResumeAnalysis.find({ user: oid, createdAt: { $gte: since } }).select('createdAt').lean(),
+        AIStudyPlan.find({ student: oid, createdAt: { $gte: since } }).select('createdAt').lean(),
+    ]);
+
+    const dayKey = (d) => new Date(d).toISOString().slice(0, 10);
+    const days = new Set([...s1, ...s2, ...s3].map((x) => dayKey(x.createdAt)));
+    if (days.size === 0) return 0;
+
+    const today = new Date();
+    const startKey = days.has(dayKey(today))
+        ? dayKey(today)
+        : dayKey(new Date(today.getTime() - 86400000));
+    if (!days.has(startKey)) return 0;
+
+    let streak = 0;
+    const cursor = new Date(startKey + 'T00:00:00Z');
+    while (days.has(dayKey(cursor))) {
+        streak += 1;
+        cursor.setUTCDate(cursor.getUTCDate() - 1);
+    }
+    return streak;
+};
+
 const getDashboardAnalytics = async (studentId) => {
-    const [readinessScore, lastSession, totalInterviews, profile, nextMock] = await Promise.all([
+    const [readinessScore, lastSession, totalInterviews, profile, nextMock, activeStreak] = await Promise.all([
         computeReadinessScore(studentId),
         InterviewSession.findOne({ student: studentId, status: 'completed' }).sort({ completedAt: -1 }).lean(),
         InterviewSession.countDocuments({ student: studentId, status: 'completed' }),
         StudentProfile.findOne({ user: studentId }).lean(),
-        getNextScheduledMock(studentId)
+        getNextScheduledMock(studentId),
+        computeActiveStreak(studentId),
     ]);
 
     const lastInterviewScore = lastSession?.finalCompositeScore ?? null;
-
-    let activeStreak = 0;
-    if (profile) {
-        activeStreak = profile.streakDays || 0;
-    }
 
     const profileSession = lastSession
         ? await InterviewAnalytics.findOne({ session: lastSession._id }).lean()
@@ -209,7 +222,8 @@ const getDashboardAnalytics = async (studentId) => {
         date: nextMock.date,
         targetRole: nextMock.targetRole,
         title: nextMock.title,
-        isEstimated: nextMock.isEstimated
+        isEstimated: nextMock.isEstimated,
+        resumable: Boolean(nextMock.resumable),
     } : null;
 
     return {
@@ -666,10 +680,23 @@ const generateFallbackStudyPlan = (targetRole, profile, performanceData) => {
     };
 
     const topicsKey = Object.keys(baseTopics).find(k => roleLower.includes(k)) || 'default';
+
+    // Real starting competency, per topic area — from the student's actual
+    // score breakdown, not a random number.
+    const b = profile?.scoreBreakdown || {};
+    const areaFor = (name) => {
+        const n = name.toLowerCase();
+        if (/algorithm|data structure|dsa|coding|oop|object-oriented/.test(n)) return b.codingPerformance;
+        if (/aptitude|reasoning|quant/.test(n)) return b.aptitudePerformance;
+        if (/communication|soft skill|hr|resume|behavioral/.test(n)) return b.communicationSkills;
+        if (/system design|scalab|network|operating system|database/.test(n)) return b.mockInterviewPerformance;
+        return profile?.placementReadinessScore;
+    };
+
     const topics = baseTopics[topicsKey].map(t => ({
         ...t,
         priority: t.estimatedHours > 15 ? 'high' : 'medium',
-        competencyBefore: Math.max(0, Math.round((profile?.placementReadinessScore || 50) + (Math.random() * 30 - 15))),
+        competencyBefore: Math.max(0, Math.min(100, Math.round(areaFor(t.topicName) || profile?.placementReadinessScore || 0))),
         resources: [
             { type: 'article', title: `${t.topicName} - Official Documentation`, url: 'https://developer.mozilla.org', priority: 'high' },
             { type: 'practice', title: `${t.topicName} Practice Problems`, url: 'https://leetcode.com', priority: 'medium' }
@@ -686,12 +713,18 @@ const generateFallbackStudyPlan = (targetRole, profile, performanceData) => {
         keyImprovementAreas: ['Technical Depth', 'System Design Awareness', 'Practical Coding Practice', 'Communication Skills', 'Domain Knowledge'],
         estimatedTotalHours: totalHours,
         topics,
-        milestones: Array.from({ length: Math.min(weeks, 8) }, (_, i) => ({
-            week: i + 1,
-            title: `Week ${i + 1}: Focus on Phase ${i + 1}`,
-            topics: topics.slice(i * (Math.ceil(topics.length / weeks)), (i + 1) * (Math.ceil(topics.length / weeks))).map(t => t.topicName),
-            targetCompetency: Math.min(100, 50 + ((i + 1) * 7))
-        }))
+        milestones: Array.from({ length: Math.min(weeks, 8) }, (_, i) => {
+            const totalWeeks = Math.min(weeks, 8);
+            const start = Math.round(profile?.placementReadinessScore || 0);
+            // Progress linearly from the current readiness toward a realistic target.
+            const target = Math.min(100, Math.round(start + ((90 - start) * ((i + 1) / totalWeeks))));
+            return {
+                week: i + 1,
+                title: `Week ${i + 1}: Focus on Phase ${i + 1}`,
+                topics: topics.slice(i * (Math.ceil(topics.length / weeks)), (i + 1) * (Math.ceil(topics.length / weeks))).map(t => t.topicName),
+                targetCompetency: target,
+            };
+        })
     };
 };
 

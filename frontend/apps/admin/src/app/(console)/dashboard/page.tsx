@@ -4,17 +4,17 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { CountUp } from "@synclyft/ui/components/CountUp";
 import { Button } from "@synclyft/ui/components/Button";
-import { Badge } from "@synclyft/ui/components/Badge";
-import { SkeletonCard } from "@synclyft/ui/components/SkeletonBlock";
+import { SkeletonBlock } from "@synclyft/ui/components/SkeletonBlock";
 import { superAdminService } from "@synclyft/lib/api/services";
 import { toApiError } from "@synclyft/lib/api";
 import {
-  ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
+  ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, Line, Legend,
 } from "recharts";
 import {
   Users, Building2, CreditCard, Armchair, FileText, AlertCircle, ArrowRight, GraduationCap,
   Activity, ShieldAlert, TrendingUp, ClipboardCheck, IndianRupee,
 } from "lucide-react";
+import { PageHeader } from "@/components/PageHeader";
 
 interface Overview {
   users: { students: number; collegeAdmins: number; superAdmins: number; pendingAdmins: number };
@@ -33,9 +33,11 @@ interface Analytics {
 interface Pending { _id?: string; id?: string; name?: string; email?: string; organization?: string; createdAt?: string }
 
 const VIOLATION_LABELS: Record<string, string> = {
-  tab_switch: "Tab switch", window_minimize: "Window minimise", paste_attempt: "Paste attempt",
-  face_not_visible: "Face not visible", multiple_faces: "Multiple faces", context_menu: "Right-click",
-  copy_attempt: "Copy attempt", audio_anomaly: "Audio anomaly",
+  tab_switch: "Tab switch", window_minimize: "Window minimise", window_blur: "Lost focus",
+  paste_attempt: "Paste attempt", copy_attempt: "Copy attempt", context_menu: "Right-click",
+  face_absence: "Face not visible", face_not_visible: "Face not visible", multiple_faces: "Multiple faces",
+  gaze_deviation: "Looking away", multiple_voices: "Multiple voices", audio_anomaly: "Audio anomaly",
+  phone_detected: "Phone detected", person_detected: "Another person", multiple_persons: "Multiple people",
 };
 
 export default function AdminDashboardPage() {
@@ -76,12 +78,12 @@ export default function AdminDashboardPage() {
 
   const kpis = ov ? [
     { label: "Students", value: ov.users.students, icon: GraduationCap, color: "#4D7CFF", href: "/students" },
-    { label: "Colleges", value: ov.users.collegeAdmins, icon: Users, color: "#0062FF", href: "/organizations" },
+    { label: "College admins", value: ov.users.collegeAdmins, icon: Users, color: "#0062FF", href: "/organizations" },
     { label: "Organizations", value: ov.organizations, icon: Building2, color: "#3DDC84", href: "/organizations" },
     { label: "Active subscriptions", value: ov.subscriptions.activeSubscriptions, icon: CreditCard, color: "#F59E0B", href: "/subscriptions" },
-    { label: "Seats used", value: ov.seats.usedSeats, sub: `of ${ov.seats.totalSeats} · ${ov.seats.usagePercentage}%`, icon: Armchair, color: "#8B5CF6", href: "/subscriptions" },
+    { label: "Seats allocated", value: ov.seats.usedSeats, sub: `of ${ov.seats.totalSeats} · ${ov.seats.usagePercentage}% used`, icon: Armchair, color: "#8B5CF6", href: "/subscriptions" },
     { label: "Invoices", value: ov.billing.invoices, sub: `${ov.billing.completedInvoices} paid`, icon: FileText, color: "#EC4899", href: "/subscriptions" },
-    { label: "Verified profiles", value: ov.verifiedProfiles, icon: TrendingUp, color: "#14B8A6" },
+    { label: "Scored student profiles", value: ov.verifiedProfiles, sub: "have a readiness score", icon: TrendingUp, color: "#14B8A6", href: "/students" },
     { label: "Pending approvals", value: ov.users.pendingAdmins, icon: ClipboardCheck, color: "#FF5C5C", href: "/pending-colleges" },
   ] : [];
 
@@ -90,19 +92,20 @@ export default function AdminDashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <p className="label-caption" style={{ color: "var(--th-text-faint)" }}>Platform</p>
-          <h1 className="text-2xl font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>Overview</h1>
-        </div>
-        {ov && ov.users.pendingAdmins > 0 && (
-          <Link href="/pending-colleges">
-            <Button icon={<AlertCircle size={14} />}>
-              {ov.users.pendingAdmins} college{ov.users.pendingAdmins > 1 ? "s" : ""} awaiting approval
-            </Button>
-          </Link>
-        )}
-      </div>
+      <PageHeader
+        eyebrow="Platform"
+        title="Overview"
+        subtitle="Live health of every institution, subscription and interview on Synclyft"
+        actions={
+          ov && ov.users.pendingAdmins > 0 ? (
+            <Link href="/pending-colleges">
+              <Button icon={<AlertCircle size={14} />}>
+                {ov.users.pendingAdmins} college{ov.users.pendingAdmins > 1 ? "s" : ""} awaiting approval
+              </Button>
+            </Link>
+          ) : undefined
+        }
+      />
 
       {error && (
         <div className="flex items-center justify-between gap-3 rounded-xl border p-4 text-sm"
@@ -113,11 +116,11 @@ export default function AdminDashboardPage() {
       )}
 
       {loading ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} className="h-28" />)}</div>
+        <DashboardSkeleton />
       ) : (
         <>
           {/* Platform KPIs */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:gap-4 grid-cols-2 lg:grid-cols-4">
             {kpis.map((k) => {
               const card = (
                 <div className="rounded-2xl border p-5 h-full transition-colors hover:border-[color:var(--th-primary)]" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
@@ -175,9 +178,17 @@ export default function AdminDashboardPage() {
                     <XAxis dataKey="date" tick={{ fontSize: 10, fill: "var(--th-text-faint)" }} axisLine={false} tickLine={false} />
                     <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: "var(--th-text-faint)" }} axisLine={false} tickLine={false} />
                     <Tooltip contentStyle={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)", borderRadius: 12, fontSize: 11 }} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
                     <Area dataKey="sessions" name="Sessions" stroke="#0062FF" strokeWidth={2} fill="url(#adminSess)" />
+                    <Line dataKey="score" name="Avg score" stroke="#3DDC84" strokeWidth={2} dot={false} />
                   </AreaChart>
                 </ResponsiveContainer>
+              ) : trend.length === 1 ? (
+                <div className="flex flex-col items-center gap-1 py-16 text-center">
+                  <p className="text-2xl font-bold" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>{trend[0].sessions}</p>
+                  <p className="text-xs" style={{ color: "var(--th-text-faint)" }}>sessions on {trend[0].date} · avg score {trend[0].score}</p>
+                  <p className="text-[11px]" style={{ color: "var(--th-text-faint)" }}>A trend line appears once activity spans multiple days.</p>
+                </div>
               ) : (
                 <p className="text-xs py-16 text-center" style={{ color: "var(--th-text-faint)" }}>No interview activity in this window yet.</p>
               )}
@@ -188,7 +199,7 @@ export default function AdminDashboardPage() {
           <div className="grid gap-5 lg:grid-cols-3">
             <div className="rounded-2xl border p-6" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
               <h3 className="text-sm font-bold flex items-center gap-2 mb-4" style={{ color: "var(--th-text-primary)" }}>
-                <ShieldAlert size={14} /> Proctoring health
+                <ShieldAlert size={14} /> Proctoring health <span className="text-[11px] font-normal" style={{ color: "var(--th-text-faint)" }}>last 30 days</span>
               </h3>
               {pr ? (
                 <div className="space-y-2.5 text-xs">
@@ -209,7 +220,9 @@ export default function AdminDashboardPage() {
             </div>
 
             <div className="rounded-2xl border p-6" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
-              <h3 className="text-sm font-bold mb-4" style={{ color: "var(--th-text-primary)" }}>Top integrity flags</h3>
+              <h3 className="text-sm font-bold mb-4 flex items-center gap-2" style={{ color: "var(--th-text-primary)" }}>
+                Top integrity flags <span className="text-[11px] font-normal" style={{ color: "var(--th-text-faint)" }}>last 30 days</span>
+              </h3>
               {(analytics?.topViolationTypes ?? []).length > 0 ? (
                 <div className="space-y-2">
                   {analytics!.topViolationTypes.slice(0, 6).map((v) => {
@@ -256,6 +269,54 @@ export default function AdminDashboardPage() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+const skelCard = "rounded-2xl border p-5";
+const skelStyle = { backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" };
+
+function DashboardSkeleton() {
+  return (
+    <div className="space-y-6">
+      {/* KPI grid — matches the 8-card 2/4-col layout exactly */}
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className={skelCard} style={skelStyle}>
+            <div className="flex items-center justify-between">
+              <SkeletonBlock height="h-3" width="w-20" />
+              <SkeletonBlock height="h-7" width="w-7" className="rounded" />
+            </div>
+            <SkeletonBlock height="h-7" width="w-14" className="mt-3" />
+            <SkeletonBlock height="h-2.5" width="w-24" className="mt-2" />
+          </div>
+        ))}
+      </div>
+
+      {/* Revenue + interview activity */}
+      <div className="grid gap-5 lg:grid-cols-3">
+        <div className={`${skelCard} p-6`} style={skelStyle}>
+          <SkeletonBlock height="h-3" width="w-40" />
+          <SkeletonBlock height="h-8" width="w-28" className="mt-3" />
+          <SkeletonBlock height="h-3" width="w-full" className="mt-4" />
+        </div>
+        <div className={`${skelCard} p-6 lg:col-span-2`} style={skelStyle}>
+          <SkeletonBlock height="h-4" width="w-48" />
+          <SkeletonBlock height="h-[200px]" width="w-full" className="mt-4 rounded-xl" />
+        </div>
+      </div>
+
+      {/* Proctoring + flags + pending */}
+      <div className="grid gap-5 lg:grid-cols-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className={`${skelCard} p-6`} style={skelStyle}>
+            <SkeletonBlock height="h-4" width="w-36" />
+            <div className="mt-4 space-y-2.5">
+              {Array.from({ length: 5 }).map((_, j) => <SkeletonBlock key={j} height="h-3" width={j % 2 ? "w-full" : "w-4/5"} />)}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

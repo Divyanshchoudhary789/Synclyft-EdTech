@@ -9,12 +9,13 @@ import { CountUp } from "@synclyft/ui/components/CountUp";
 import { SkeletonCard } from "@synclyft/ui/components/SkeletonBlock";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell, CartesianGrid } from "recharts";
 import {
-  Users, TrendingUp, Award, Activity, Layers, Megaphone, Armchair,
+  Users, TrendingUp, Award, Layers, Megaphone, Armchair,
   BarChart3, FileText, Sparkles, ArrowRight, AlertCircle,
 } from "lucide-react";
 import { getGradeColor, getGradeBand } from "@synclyft/lib/utils";
 import { collegeAdminService } from "@synclyft/lib/api/services";
 import { toApiError } from "@synclyft/lib/api";
+import { PageHeader } from "@/components/PageHeader";
 
 interface StudentRow {
   id: string;
@@ -33,15 +34,19 @@ export default function OfficerDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [report, setReport] = useState<Record<string, unknown> | null>(null);
+
   useEffect(() => {
     (async () => {
       setLoading(true);
       try {
-        const [d, s] = await Promise.allSettled([
+        const [d, s, r] = await Promise.allSettled([
           collegeAdminService.dashboard(),
           collegeAdminService.students({ limit: 500 }),
+          collegeAdminService.reportsDashboard(),
         ]);
         if (d.status === "fulfilled") setDash(d.value as Record<string, unknown>);
+        if (r.status === "fulfilled") setReport(r.value as Record<string, unknown>);
         if (s.status === "fulfilled") {
           setStudents(
             s.value.items.map((p) => {
@@ -63,13 +68,17 @@ export default function OfficerDashboardPage() {
     })();
   }, []);
 
-  const analytics = (dash?.analytics ?? {}) as Record<string, number>;
+  const summary = ((report?.entity as Record<string, unknown>)?.summary ?? {}) as Record<string, number>;
   const totalStudents = Number(dash?.studentCount ?? students.length);
-  const avgReadiness = students.length
-    ? Math.round(students.reduce((a, c) => a + c.readiness, 0) / students.length)
-    : 0;
+  // Prefer the authoritative cohort-wide average from the reports service;
+  // fall back to a client-side mean over the loaded roster.
+  const avgReadiness = summary.averageReadinessScore != null
+    ? Math.round(Number(summary.averageReadinessScore))
+    : students.length
+      ? Math.round(students.reduce((a, c) => a + c.readiness, 0) / students.length)
+      : 0;
   const readyCount = students.filter((s) => s.readiness >= 75).length;
-  const totalSessions = Number(analytics.totalInterviewSessions ?? 0);
+  const atRiskCount = Number(summary.atRiskStudentsCount ?? students.filter((s) => s.readiness > 0 && s.readiness < 50).length);
 
   const distribution = [
     { band: "Top (85+)", count: students.filter((s) => s.readiness >= 85).length },
@@ -85,7 +94,7 @@ export default function OfficerDashboardPage() {
     { label: "Total students", value: totalStudents, icon: Users, color: "#4D7CFF", href: "/dashboard/students" },
     { label: "Avg readiness", value: avgReadiness, suffix: "/100", icon: TrendingUp, color: "#0062FF", href: "/dashboard/analytics" },
     { label: "Interview-ready (75+)", value: readyCount, icon: Award, color: "#3DDC84", href: "/dashboard/students" },
-    { label: "Interview sessions", value: totalSessions, icon: Activity, color: "#F59E0B", href: "/dashboard/analytics" },
+    { label: "At risk (<50)", value: atRiskCount, icon: AlertCircle, color: "#FF5C5C", href: "/dashboard/insights" },
   ];
 
   const quickLinks = [
@@ -98,13 +107,12 @@ export default function OfficerDashboardPage() {
   ];
 
   return (
-    <div className="p-6 md:p-8 space-y-7">
-      <div>
-        <p className="label-caption mb-1" style={{ color: "var(--th-text-faint)" }}>Placement Officer Portal</p>
-        <h1 className="text-[1.75rem] font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
-          Cohort overview
-        </h1>
-      </div>
+    <div className="p-5 sm:p-6 md:p-8 space-y-6 sm:space-y-7">
+      <PageHeader
+        eyebrow="Placement officer portal"
+        title="Cohort overview"
+        subtitle="How your students are tracking toward interview readiness"
+      />
 
       {error && (
         <div className="flex items-center gap-2 rounded-xl border p-4 text-sm" style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-card-bg)", color: "var(--th-text-secondary)" }}>
@@ -113,7 +121,7 @@ export default function OfficerDashboardPage() {
       )}
 
       {loading ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><SkeletonCard className="h-28" /><SkeletonCard className="h-28" /><SkeletonCard className="h-28" /><SkeletonCard className="h-28" /></div>
+        <div className="grid gap-4 grid-cols-2 lg:grid-cols-4"><SkeletonCard className="h-28" /><SkeletonCard className="h-28" /><SkeletonCard className="h-28" /><SkeletonCard className="h-28" /></div>
       ) : (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

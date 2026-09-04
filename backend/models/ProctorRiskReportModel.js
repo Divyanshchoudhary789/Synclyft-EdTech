@@ -129,7 +129,8 @@ ProctorRiskReportSchema.index({ organization: 1, createdAt: -1 });
 ProctorRiskReportSchema.index({ cumulativeRiskScore: 1, riskLevel: 1 });
 ProctorRiskReportSchema.index({ isDisqualified: 1 });
 
-ProctorRiskReportSchema.pre('save', function(next) {
+// Mongoose 9 dropped the `next` callback in hooks — a sync hook just returns.
+ProctorRiskReportSchema.pre('save', function() {
     if (this.cumulativeRiskScore >= 80) {
         this.riskLevel = 'critical';
     } else if (this.cumulativeRiskScore >= 50) {
@@ -139,13 +140,11 @@ ProctorRiskReportSchema.pre('save', function(next) {
     } else {
         this.riskLevel = 'low';
     }
-    
+
     if (this.cumulativeRiskScore >= 100) {
         this.isDisqualified = true;
         this.disqualificationReason = 'Risk score exceeded maximum threshold';
     }
-    
-    next();
 });
 
 ProctorRiskReportSchema.statics.getRiskDistributionByOrg = async function(organizationId, days = 30) {

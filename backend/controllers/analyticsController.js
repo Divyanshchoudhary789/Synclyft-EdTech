@@ -4,6 +4,7 @@ const InterviewAnalytics = require('../models/InterviewAnalyticsModel.js');
 const ProctorRiskReport = require('../models/ProctorRiskReportModel.js');
 const ProctorSessionReport = require('../models/ProctorSessionReportModel.js');
 const RoundDetail = require('../models/RoundDetailModel.js');
+const PerformanceInsight = require('../models/PerformanceInsightModel.js');
 const StudentProfile = require('../models/StudentProfileModel.js');
 const User = require('../models/userModel.js');
 const AuditLog = require('../models/AuditLogModel.js');
@@ -39,10 +40,12 @@ const getStudentInterviewAnalytics = async (req, res) => {
                 analytics: analytics.map(a => ({
                     id: a._id,
                     sessionId: a.session,
+                    targetRole: a.metadata?.targetRole || '',
+                    status: 'completed',
                     startedAt: a.startedAt,
                     completedAt: a.completedAt,
                     totalDuration: a.totalDurationSeconds,
-                    formattedDuration: `${Math.floor(a.totalDurationSeconds / 60)}m ${a.totalDurationSeconds % 60}s`,
+                    formattedDuration: `${Math.floor((a.totalDurationSeconds || 0) / 60)}m ${(a.totalDurationSeconds || 0) % 60}s`,
                     overallScore: a.overallScore,
                     finalGrade: a.finalGrade,
                     proctoringRiskScore: a.proctoringRiskScore,
@@ -92,8 +95,11 @@ const getStudentInterviewInsights = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Interview session analytics not found.' });
         }
 
-        const sessionDetails = await InterviewSession.findById(sessionId);
-        const roundDetails = await RoundDetail.find({ session: sessionId });
+        const [sessionDetails, roundDetails, insight] = await Promise.all([
+            InterviewSession.findById(sessionId).lean(),
+            RoundDetail.find({ session: sessionId }).lean(),
+            PerformanceInsight.findOne({ session: sessionId, student: studentId }).lean(),
+        ]);
 
         return res.status(200).json({
             success: true,
@@ -104,7 +110,8 @@ const getStudentInterviewInsights = async (req, res) => {
                     jobDescription: sessionDetails?.jobDescription || '',
                     targetRole: sessionDetails?.targetRole || '',
                     preferredCodingLanguage: sessionDetails?.preferredCodingLanguage || '',
-                    status: sessionDetails?.status || ''
+                    status: sessionDetails?.status || '',
+                    completedAt: sessionDetails?.completedAt || null,
                 },
                 analytics: {
                     overallScore: analytics.overallScore,
@@ -115,15 +122,25 @@ const getStudentInterviewInsights = async (req, res) => {
                     competencyMetrics: analytics.competencyMetrics,
                     roundAnalytics: analytics.roundAnalytics,
                     performanceTrend: analytics.performanceTrend,
-                    deviceInfo: analytics.deviceInfo
+                    deviceInfo: analytics.deviceInfo,
                 },
+                // The written report (narrative / strengths / gaps / study plan) so a
+                // past report opened from the dashboard shows the same as a fresh one.
+                report: insight ? {
+                    narrativeSummary: insight.narrativeSummary || '',
+                    strengths: insight.strengths || [],
+                    weaknesses: insight.weaknesses || [],
+                    skillGapsVsJd: insight.skillGapsVsJd || [],
+                    actionableStudyPlan: insight.actionableStudyPlan || [],
+                    overallGrade: analytics.finalGrade,
+                } : null,
                 roundDetails: roundDetails.map(r => ({
                     roundType: r.roundType,
                     status: r.status,
                     roundScore: r.roundScore,
-                    questionsCount: r.questionsEvaluations?.length || 0
-                }))
-            }
+                    questionsCount: r.questionsEvaluations?.length || 0,
+                })),
+            },
         });
     } catch (err) {
         logger.error({ message: err.message, stack: err.stack });

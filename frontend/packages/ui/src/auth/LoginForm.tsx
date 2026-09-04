@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Eye, EyeOff, ArrowRight, ArrowLeft, ShieldCheck, CheckCircle2 } from "lucide-react";
+import { Eye, EyeOff, ArrowRight, ArrowLeft, ShieldCheck, CheckCircle2, Info } from "lucide-react";
 import toast from "react-hot-toast";
 import { api, toApiError } from "@synclyft/lib/api";
 import { useAuthStore } from "@synclyft/lib/store/auth";
@@ -73,7 +73,7 @@ export function LoginForm({
 
   useEffect(() => {
     const msg = params.get("message");
-    if (msg) toast(msg, { icon: "ℹ️" });
+    if (msg) toast(msg, { icon: <Info size={16} className="text-blue-500" /> });
     const err = params.get("error");
     if (err) toast.error("Sign-in failed. Please try again.");
   }, [params]);

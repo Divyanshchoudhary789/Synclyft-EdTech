@@ -2,12 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { collegeAdminService } from "@synclyft/lib/api/services";
-import { toApiError } from "@synclyft/lib/api";
+import { API_BASE_URL, toApiError } from "@synclyft/lib/api";
 import { Button } from "@synclyft/ui/components/Button";
 import { Badge } from "@synclyft/ui/components/Badge";
 import { SkeletonBlock } from "@synclyft/ui/components/SkeletonBlock";
+import { getGradeBand, getGradeColor } from "@synclyft/lib/utils";
 import Link from "next/link";
-import { Plus, Layers, X, AlertCircle, Users, Archive, ArchiveRestore, Trash2, Search, Check, Loader2, Lock } from "lucide-react";
+import { PageHeader } from "@/components/PageHeader";
+import { Modal } from "@synclyft/ui/components/Modal";
+import { Plus, Layers, X, AlertCircle, Users, Archive, ArchiveRestore, Trash2, Search, Check, Loader2, Lock, BarChart3, Download, GitCompareArrows, Sparkles, CornerDownRight, RefreshCw, FileText, Trophy } from "lucide-react";
+import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RTooltip, Legend, CartesianGrid,
+} from "recharts";
 import toast from "react-hot-toast";
 
 interface BatchStudent { student?: { _id?: string; name?: string; email?: string } | string; status?: string }
@@ -36,6 +42,8 @@ export default function BatchesPage() {
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [manageId, setManageId] = useState<string | null>(null);
+  const [reportId, setReportId] = useState<string | null>(null);
+  const [compareOpen, setCompareOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -96,14 +104,21 @@ export default function BatchesPage() {
   const manageBatch = batches.find((b) => b._id === manageId) ?? null;
 
   return (
-    <div className="p-6 md:p-8 space-y-6">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-lg font-semibold" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>Batches</h1>
-          <p className="text-xs" style={{ color: "var(--th-text-faint)" }}>Group students by department and graduation year, then run campaigns against them</p>
-        </div>
-        <Button icon={<Plus size={14} />} onClick={() => setModal(true)}>New batch</Button>
-      </div>
+    <div className="p-5 sm:p-6 md:p-8 space-y-6">
+      <PageHeader
+        eyebrow="Cohort"
+        title="Batches"
+        subtitle="Group students by department and graduation year, then run campaigns against them"
+        actions={
+          <>
+            <Button variant="secondary" icon={<GitCompareArrows size={14} />} onClick={() => setCompareOpen(true)}
+              disabled={batches.filter((b) => b.status !== "archived").length < 2}>
+              Compare
+            </Button>
+            <Button icon={<Plus size={14} />} onClick={() => setModal(true)}>New batch</Button>
+          </>
+        }
+      />
 
       {error && /subscription|plan/i.test(error) ? (
         <div className="rounded-2xl border p-6 text-center" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
@@ -150,6 +165,10 @@ export default function BatchesPage() {
                       Manage students
                     </button>
                   )}
+                  <button onClick={() => setReportId(b._id)}
+                    className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border" style={{ borderColor: "var(--th-border)", color: "var(--th-text-secondary)" }}>
+                    <BarChart3 size={11} /> Report
+                  </button>
                   {b.status !== "archived" ? (
                     <button disabled={busy === b._id} onClick={() => act(b._id, () => collegeAdminService.archiveBatch(b._id), "Batch archived")}
                       className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border disabled:opacity-50" style={{ borderColor: "var(--th-border)", color: "var(--th-text-secondary)" }}>
@@ -209,8 +228,349 @@ export default function BatchesPage() {
       {manageBatch && (
         <ManageStudentsModal batch={manageBatch} roster={roster} onClose={() => setManageId(null)} onChanged={load} />
       )}
+      {reportId && (
+        <BatchReportDrawer
+          batchId={reportId}
+          batchName={batches.find((b) => b._id === reportId)?.batchName ?? "Batch"}
+          onClose={() => setReportId(null)}
+        />
+      )}
+      {compareOpen && (
+        <CompareBatchesModal
+          batches={batches.filter((b) => b.status !== "archived").map((b) => ({ _id: b._id, batchName: b.batchName, department: b.department, graduationYear: b.graduationYear }))}
+          onClose={() => setCompareOpen(false)}
+        />
+      )}
     </div>
   );
+}
+
+const METRIC_LABELS: Record<string, string> = {
+  averageReadinessScore: "Avg readiness",
+  averageInterviewScore: "Avg interview",
+  averageRiskScore: "Avg risk",
+  totalSessions: "Sessions",
+  completedSessions: "Completed",
+};
+
+function CompareBatchesModal({
+  batches, onClose,
+}: { batches: { _id: string; batchName: string; department?: string; graduationYear?: number }[]; onClose: () => void }) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [data, setData] = useState<Record<string, unknown> | null>(null);
+  const [ai, setAi] = useState<Record<string, unknown> | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const toggle = (id: string) =>
+    setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  const run = async () => {
+    if (selected.size < 2) return toast.error("Pick at least two batches");
+    setLoading(true);
+    setError(null);
+    setData(null);
+    setAi(null);
+    try {
+      setData(await collegeAdminService.compareBatches({ batchIds: [...selected] }) as Record<string, unknown>);
+    } catch (err) {
+      setError(toApiError(err).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const runAi = async () => {
+    setAiLoading(true);
+    try {
+      setAi(await collegeAdminService.aiComparativeReport({ batchIds: [...selected] }) as Record<string, unknown>);
+    } catch (err) {
+      toast.error(toApiError(err).message);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const rows = (data?.batches ?? []) as Record<string, unknown>[];
+  const insight = data?.comparisonInsight as Record<string, unknown> | undefined;
+  const chartData = rows.map((r) => {
+    const m = (r.metrics ?? {}) as Record<string, number>;
+    return {
+      name: String(r.batchName ?? "").slice(0, 14),
+      readiness: Math.round(m.averageReadinessScore ?? 0),
+      interview: Math.round(m.averageInterviewScore ?? 0),
+      risk: Math.round(m.averageRiskScore ?? 0),
+    };
+  });
+  const weakAreas = (ai?.weakestSkillAreas ?? []) as { area: string; averageScore: number }[];
+  const aiRecs = (ai?.recommendations ?? []) as { priority?: string; title?: string; description?: string; action?: string }[];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <div className="w-full max-w-3xl rounded-2xl border p-6 relative max-h-[88vh] overflow-y-auto" style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" }}>
+        <button onClick={onClose} className="absolute right-4 top-4" style={{ color: "var(--th-text-faint)" }}><X size={18} /></button>
+        <h3 className="text-sm font-bold mb-1" style={{ color: "var(--th-text-primary)" }}>Compare batches</h3>
+        <p className="text-xs mb-4" style={{ color: "var(--th-text-faint)" }}>Select two or more batches to benchmark readiness, interview scores and integrity risk.</p>
+
+        <div className="flex flex-wrap gap-2 mb-4">
+          {batches.map((b) => {
+            const on = selected.has(b._id);
+            return (
+              <button key={b._id} onClick={() => toggle(b._id)}
+                className="px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors"
+                style={{
+                  backgroundColor: on ? "var(--th-primary)" : "transparent",
+                  color: on ? "#fff" : "var(--th-text-secondary)",
+                  borderColor: on ? "var(--th-primary)" : "var(--th-border)",
+                }}>
+                {b.batchName}{b.graduationYear ? ` · ${b.graduationYear}` : ""}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex gap-2 mb-5">
+          <Button size="sm" loading={loading} onClick={run} disabled={selected.size < 2}>Compare</Button>
+          {data && <Button size="sm" variant="secondary" loading={aiLoading} icon={<Sparkles size={12} />} onClick={runAi}>AI report</Button>}
+        </div>
+
+        {error && <p className="text-xs mb-4" style={{ color: "var(--th-text-secondary)" }}><AlertCircle size={14} className="inline mr-1 text-amber-500" />{error}</p>}
+
+        {rows.length > 0 && (
+          <div className="space-y-5">
+            <div className="rounded-xl border p-4" style={{ borderColor: "var(--th-card-border)" }}>
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={chartData} margin={{ left: -20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--th-border)" vertical={false} />
+                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: "var(--th-text-faint)" }} axisLine={false} tickLine={false} />
+                  <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: "var(--th-text-faint)" }} axisLine={false} tickLine={false} />
+                  <RTooltip contentStyle={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)", borderRadius: 10, fontSize: 11 }} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Bar dataKey="readiness" name="Readiness" fill="#0062FF" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="interview" name="Interview" fill="#3DDC84" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="risk" name="Risk" fill="#FF5C5C" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="rounded-xl border overflow-x-auto" style={{ borderColor: "var(--th-card-border)" }}>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr style={{ color: "var(--th-text-faint)" }}>
+                    <th className="text-left px-4 py-2 font-bold">Batch</th>
+                    <th className="text-right px-3 py-2 font-bold">Students</th>
+                    {Object.values(METRIC_LABELS).map((l) => <th key={l} className="text-right px-3 py-2 font-bold whitespace-nowrap">{l}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r, i) => {
+                    const m = (r.metrics ?? {}) as Record<string, number>;
+                    return (
+                      <tr key={i} className="border-t" style={{ borderColor: "var(--th-border)", color: "var(--th-text-secondary)" }}>
+                        <td className="px-4 py-2 truncate" style={{ color: "var(--th-text-primary)" }}>{String(r.batchName ?? "")}</td>
+                        <td className="px-3 py-2 text-right font-mono">{String(r.studentCount ?? 0)}</td>
+                        {Object.keys(METRIC_LABELS).map((k) => <td key={k} className="px-3 py-2 text-right font-mono">{Math.round(m[k] ?? 0)}</td>)}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {insight && (
+              <div className="rounded-xl border p-4 text-xs space-y-1" style={{ borderColor: "var(--th-card-border)", backgroundColor: "color-mix(in srgb, var(--th-primary) 5%, transparent)" }}>
+                <p style={{ color: "var(--th-text-primary)" }}>
+                  <span className="font-semibold text-emerald-600 dark:text-emerald-400">{String(insight.highestPerformingBatch ?? "")}</span> leads at {String(insight.highestReadinessScore ?? 0)}% readiness ·{" "}
+                  <span className="font-semibold text-rose-600 dark:text-rose-400">{String(insight.lowestPerformingBatch ?? "")}</span> trails at {String(insight.lowestReadinessScore ?? 0)}% (gap {String(insight.performanceGap ?? 0)})
+                </p>
+                <p style={{ color: "var(--th-text-secondary)" }}>{String(insight.recommendation ?? "")}</p>
+              </div>
+            )}
+
+            {ai && (
+              <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: "var(--th-card-border)" }}>
+                <p className="text-xs font-bold flex items-center gap-1.5" style={{ color: "var(--th-text-primary)" }}><Sparkles size={13} className="text-blue-500" /> AI comparative report</p>
+                {weakAreas.length > 0 && (
+                  <div>
+                    <p className="text-[10px] uppercase font-bold mb-1" style={{ color: "var(--th-text-faint)" }}>Weakest skill areas</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {weakAreas.map((w) => (
+                        <span key={w.area} className="px-2 py-0.5 rounded-full text-[10px] border" style={{ borderColor: "var(--th-border)", color: "var(--th-text-muted)" }}>
+                          {w.area}: {w.averageScore}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {aiRecs.map((r, i) => (
+                  <div key={i} className="text-xs">
+                    <p className="font-semibold" style={{ color: "var(--th-text-primary)" }}>{r.title} {r.priority && <span className="text-[9px] uppercase ml-1" style={{ color: "var(--th-text-faint)" }}>{r.priority}</span>}</p>
+                    <p style={{ color: "var(--th-text-secondary)" }}>{r.description}</p>
+                    {r.action && (
+                      <p className="text-[11px] mt-0.5 flex items-start gap-1" style={{ color: "var(--th-text-muted)" }}>
+                        <CornerDownRight size={11} className="mt-0.5 shrink-0" /> {r.action}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BatchReportDrawer({ batchId, batchName, onClose }: { batchId: string; batchName: string; onClose: () => void }) {
+  const [data, setData] = useState<Record<string, unknown> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [dl, setDl] = useState<"csv" | "pdf" | null>(null);
+  const [recalc, setRecalc] = useState(false);
+  const [nonce, setNonce] = useState(0);
+
+  const recalculate = async () => {
+    setRecalc(true);
+    try {
+      const res = await collegeAdminService.recalculateScores(batchId);
+      toast.success(res?.message ?? "Readiness scores recalculated");
+      setNonce((n) => n + 1);
+    } catch (err) {
+      toast.error(toApiError(err).message);
+    } finally {
+      setRecalc(false);
+    }
+  };
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    collegeAdminService.batchReportDashboard(batchId)
+      .then((d) => { if (alive) setData(d as Record<string, unknown>); })
+      .catch((err) => { if (alive) setError(toApiError(err).message); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [batchId, nonce]);
+
+  const download = async (format: "csv" | "pdf") => {
+    setDl(format);
+    try {
+      const res = await fetch(`${API_BASE_URL}/college-admin/reports/batches/${batchId}/download?format=${format}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Report export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `batch-report.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(toApiError(err).message);
+    } finally {
+      setDl(null);
+    }
+  };
+
+  const summary = (data?.entity as Record<string, unknown>)?.summary as Record<string, number> | undefined;
+  const top = (data?.topStudents ?? []) as Record<string, unknown>[];
+  const risk = (data?.atRiskStudents ?? []) as Record<string, unknown>[];
+  const students = Number(summary?.activeStudents ?? summary?.totalStudents ?? 0);
+  const avgReadiness = Math.round(Number(summary?.averageReadinessScore ?? 0));
+  const band = getGradeBand(avgReadiness);
+  const bandColor = getGradeColor(band);
+  const cardStyle = { backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-card-border)" };
+  const sectionTitle = "text-[11px] font-bold uppercase tracking-wider mb-2.5";
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      size="lg"
+      icon={<div className="rounded-xl bg-blue-500/10 p-2 text-blue-600 dark:text-blue-400"><BarChart3 size={16} /></div>}
+      title={batchName}
+      subtitle="Batch performance report"
+      headerRight={
+        !loading && !error ? (
+          <span className="hidden items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold sm:flex"
+            style={{ backgroundColor: bandColor + "1f", color: bandColor }}>
+            {avgReadiness}<span className="text-[10px] font-medium opacity-70">avg</span>
+          </span>
+        ) : undefined
+      }
+      footer={
+        !loading && !error ? (
+          <>
+            <Button variant="ghost" size="sm" loading={recalc} icon={<RefreshCw size={13} />} onClick={recalculate}>Recalculate</Button>
+            <Button variant="secondary" size="sm" loading={dl === "csv"} icon={<Download size={13} />} onClick={() => download("csv")}>CSV</Button>
+            <Button size="sm" loading={dl === "pdf"} icon={<FileText size={13} />} onClick={() => download("pdf")}>PDF</Button>
+          </>
+        ) : undefined
+      }
+    >
+      {loading ? (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{[0, 1, 2, 3].map((i) => <SkeletonBlock key={i} height="h-16" className="rounded-xl" />)}</div>
+          <SkeletonBlock height="h-40" className="rounded-2xl" />
+        </div>
+      ) : error ? (
+        <div className="flex items-center gap-2 py-6 text-sm" style={{ color: "var(--th-text-secondary)" }}>
+          <AlertCircle size={16} className="text-amber-500" /> {error}
+        </div>
+      ) : (
+        <div className="space-y-5">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {[
+              { label: "Students", value: students },
+              { label: "Avg readiness", value: avgReadiness, color: bandColor },
+              { label: "Avg interview", value: Math.round(Number(summary?.averageInterviewScore ?? 0)) },
+              { label: "Avg risk", value: Math.round(Number(summary?.averageRiskScore ?? 0)), color: Number(summary?.averageRiskScore ?? 0) > 50 ? "#FF5C5C" : undefined },
+            ].map((k) => (
+              <div key={k.label} className="rounded-xl border p-3.5" style={cardStyle}>
+                <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: "var(--th-text-faint)" }}>{k.label}</p>
+                <p className="mt-1.5 text-xl font-bold" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: k.color ?? "var(--th-text-primary)" }}>{k.value}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            {[
+              { title: "Top students", icon: <Trophy size={12} className="text-emerald-500" />, rows: top },
+              { title: "Needs intervention", icon: <ShieldAlertMini />, rows: risk },
+            ].map((sec) => (
+              <div key={sec.title}>
+                <p className={`${sectionTitle} flex items-center gap-1.5`} style={{ color: "var(--th-text-primary)" }}>{sec.icon} {sec.title}</p>
+                {sec.rows.length === 0 ? (
+                  <p className="rounded-xl border px-3 py-4 text-center text-xs" style={{ borderColor: "var(--th-card-border)", color: "var(--th-text-faint)" }}>No data yet.</p>
+                ) : (
+                  <div className="divide-y overflow-hidden rounded-xl border" style={{ borderColor: "var(--th-card-border)" }}>
+                    {sec.rows.slice(0, 8).map((r, i) => {
+                      const score = Math.round(Number(r.placementReadinessScore ?? 0));
+                      const color = getGradeColor(getGradeBand(score));
+                      return (
+                        <div key={i} className="flex items-center gap-3 px-3.5 py-2.5 text-xs" style={{ borderColor: "var(--th-border)" }}>
+                          <span className="flex-1 truncate font-medium" style={{ color: "var(--th-text-primary)" }}>{String(r.name ?? "—")}</span>
+                          <span className="shrink-0 text-[10px]" style={{ color: "var(--th-text-faint)" }}>{String(r.branch ?? "")}</span>
+                          <span className="shrink-0 font-mono font-bold" style={{ color }}>{score}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function ShieldAlertMini() {
+  return <AlertCircle size={12} className="text-rose-500" />;
 }
 
 function ManageStudentsModal({

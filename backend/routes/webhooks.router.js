@@ -119,7 +119,7 @@ router.post('/razorpay-webhook', async (req, res) => {
             type: 'payment_due',
             title: 'Payment Received',
             message: `Payment of INR ${(paymentData.amount / 100).toFixed(2)} received for invoice ${billing.invoiceNumber}.`,
-            actionUrl: isIndividual ? '/student/dashboard' : '/billing',
+            actionUrl: isIndividual ? '/dashboard' : '/dashboard/billing',
             actionText: 'View Invoice',
             priority: 'normal',
             metadata: { billingId: billing._id, paymentId: paymentData.id }
@@ -173,7 +173,7 @@ router.post('/razorpay-webhook', async (req, res) => {
               type: 'payment_reminder',
               title: 'Payment Failed',
               message: `Payment of INR ${(paymentData.amount / 100).toFixed(2)} failed for invoice ${billing.invoiceNumber}. Please retry.`,
-              actionUrl: '/billing',
+              actionUrl: '/dashboard/billing',
               actionText: 'Retry Payment',
               priority: 'urgent',
               metadata: { billingId: billing._id, errorCode: paymentData.error_code }

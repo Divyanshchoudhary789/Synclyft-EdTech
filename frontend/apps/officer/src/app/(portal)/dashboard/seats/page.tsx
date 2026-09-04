@@ -7,6 +7,7 @@ import { CountUp } from "@synclyft/ui/components/CountUp";
 import { SkeletonCard } from "@synclyft/ui/components/SkeletonBlock";
 import { Search, AlertCircle, Armchair } from "lucide-react";
 import toast from "react-hot-toast";
+import { PageHeader } from "@/components/PageHeader";
 
 interface StudentRow {
   id: string;
@@ -84,11 +85,12 @@ export default function SeatsPage() {
   );
 
   return (
-    <div className="p-6 md:p-8 space-y-6">
-      <div>
-        <h1 className="text-lg font-semibold" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>Seat management</h1>
-        <p className="text-xs" style={{ color: "var(--th-text-faint)" }}>Allocate your subscription seats to students so they can take proctored mock interviews</p>
-      </div>
+    <div className="p-5 sm:p-6 md:p-8 space-y-6">
+      <PageHeader
+        eyebrow="Access"
+        title="Seat management"
+        subtitle="Allocate your subscription seats to students so they can take proctored mock interviews"
+      />
 
       {error && (
         <div className="flex items-center gap-2 rounded-xl border p-4 text-sm" style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-card-bg)", color: "var(--th-text-secondary)" }}>
@@ -98,9 +100,9 @@ export default function SeatsPage() {
       )}
 
       {loading ? (
-        <div className="grid gap-4 sm:grid-cols-3"><SkeletonCard className="h-24" /><SkeletonCard className="h-24" /><SkeletonCard className="h-24" /></div>
+        <div className="grid gap-4 grid-cols-3"><SkeletonCard className="h-24" /><SkeletonCard className="h-24" /><SkeletonCard className="h-24" /></div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 grid-cols-3">
           {[
             { label: "Total seats", value: total },
             { label: "Allocated", value: used },

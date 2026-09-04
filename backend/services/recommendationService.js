@@ -136,7 +136,7 @@ const assignRecommendationToBatch = async (recommendationId, organizationId, bat
                 title: `New recommendation assigned: ${recommendation.title}`,
                 message: `A new recommendation "${recommendation.title}" has been assigned to your batch by your placement officer.`,
                 description: recommendation.description,
-                actionUrl: '/student/recommendations',
+                actionUrl: '/study-plan',
                 actionText: 'View recommendation',
                 relatedEntity: { type: 'recommendation', entityId: recommendationId },
                 priority: 'normal'
@@ -197,7 +197,7 @@ const assignRecommendationToStudent = async (recommendationId, organizationId, s
             title: `New recommendation assigned: ${recommendation.title}`,
             message: `A new recommendation "${recommendation.title}" has been assigned to you by your placement officer.`,
             description: recommendation.description,
-            actionUrl: '/student/recommendations',
+            actionUrl: '/study-plan',
             actionText: 'View recommendation',
             priority: 'normal'
         });

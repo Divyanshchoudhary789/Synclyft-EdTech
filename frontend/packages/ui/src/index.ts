@@ -4,6 +4,7 @@ export { Button } from "./components/Button";
 export { CountUp } from "./components/CountUp";
 export { Logo } from "./components/Logo";
 export { SkeletonBlock, SkeletonCard } from "./components/SkeletonBlock";
+export { NotificationBell, NotificationsInbox } from "./components/NotificationKit";
 export { ThemeToggle } from "./components/ThemeToggle";
 export { AppProviders } from "./providers/AppProviders";
 export { ErrorBoundary } from "./ErrorBoundary";

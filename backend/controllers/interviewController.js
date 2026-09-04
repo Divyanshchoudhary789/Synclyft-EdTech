@@ -47,6 +47,144 @@ const getMongoAptitudeAnswersCollection = () => {
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Coding-question shaping
+//
+// The upstream question service returns a loosely-typed blob. The client needs a
+// stable, LeetCode-style shape: a title, a body, difficulty, tags, constraints,
+// worked examples and a set of *visible* sample test cases it can run against.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const toStr = (v) => (v == null ? "" : String(v)).trim();
+
+const fetchPublicTestCases = async (questionId) => {
+    try {
+        const col = await getMongoTestCasesCollection();
+        const doc = await col.findOne({ questionId });
+        if (!doc) return [];
+        const pub = Array.isArray(doc.public) ? doc.public : [];
+        return pub.slice(0, 6).map((tc, i) => ({
+            id: `sample-${i + 1}`,
+            input: typeof tc?.input === "string" ? tc.input : JSON.stringify(tc?.input ?? ""),
+            expectedOutput: typeof tc?.expectedOutput === "string" ? tc.expectedOutput : JSON.stringify(tc?.expectedOutput ?? ""),
+            explanation: toStr(tc?.explanation),
+        }));
+    } catch (e) {
+        logger.error("public test-case lookup failed", { questionId, error: e.message });
+        return [];
+    }
+};
+
+const firstArray = (...cands) => cands.find((c) => Array.isArray(c) && c.length) || [];
+
+const normalizeCodingQuestion = (raw = {}, publicTestCases = []) => {
+    // `raw` may be the provider's `selectedQuestion`, or a wrapper around it.
+    const q = raw?.selectedQuestion || raw?.question || raw || {};
+
+    const statement = toStr(q.problemStatement || q.statement || q.description || q.body || q.question);
+    // Derive a title: an explicit field, else the first sentence / line of the body.
+    let title = toStr(q.title || q.name || q.questionTitle);
+    if (!title && statement) {
+        const firstLine = statement.split(/\r?\n/).find((l) => l.trim());
+        title = (firstLine || "").replace(/[.:].*$/, "").slice(0, 90).trim();
+    }
+
+    const rawExamples = firstArray(q.examples, q.sampleCases, q.sampleTestCases, q.testCases);
+    const examples = rawExamples
+        .filter((e) => e && (e.input != null || e.output != null || e.expectedOutput != null))
+        .slice(0, 6)
+        .map((e, i) => ({
+            id: `ex-${i + 1}`,
+            input: toStr(typeof e.input === "string" ? e.input : JSON.stringify(e.input ?? "")),
+            output: toStr(
+                typeof (e.output ?? e.expectedOutput) === "string"
+                    ? (e.output ?? e.expectedOutput)
+                    : JSON.stringify(e.output ?? e.expectedOutput ?? "")
+            ),
+            explanation: toStr(e.explanation || e.note),
+        }));
+
+    const constraints = firstArray(q.constraints, q.constraintList)
+        .map((c) => toStr(c)).filter(Boolean);
+
+    const topicTags = firstArray(q.topicTags, q.tags, q.topics, q.categories)
+        .map((t) => toStr(typeof t === "string" ? t : t?.name)).filter(Boolean).slice(0, 8);
+
+    // Per-language starter code, if the provider ships it.
+    const starterCode = {};
+    const rawStarters = q.starterCode || q.boilerplate || q.codeStubs || q.templates;
+    if (rawStarters && typeof rawStarters === "object") {
+        for (const [k, v] of Object.entries(rawStarters)) {
+            const code = typeof v === "string" ? v : toStr(v?.code || v?.template);
+            if (code) starterCode[k.toLowerCase()] = code;
+        }
+    }
+
+    return {
+        questionId: toStr(q.questionId || q.id || q._id),
+        title: title || "Coding Problem",
+        problemStatement: statement,
+        difficulty: toStr(q.difficulty || q.level || q.difficultyTag) || "Medium",
+        topicTags,
+        constraints,
+        examples,
+        sampleTestCases: publicTestCases,
+        starterCode,
+        timeLimitMs: Number(q.timeLimitMs || q.timeLimit || 0) || null,
+        memoryLimitKb: Number(q.memoryLimitKb || q.memoryLimit || 0) || null,
+    };
+};
+
+// Run (not submit): execute the candidate's code against only the visible sample
+// cases. No AI grading, no persistence — this is the "Run" button, mirroring
+// LeetCode. Degrades gracefully when the sandbox is offline.
+const runCodeAgainstSamples = async ({ questionId, code, language }) => {
+    const samples = await fetchPublicTestCases(questionId);
+    if (samples.length === 0) {
+        return { sandboxAvailable: false, ran: false, message: "This problem has no visible sample cases to run. Use Submit to have your solution evaluated.", cases: [] };
+    }
+
+    const tcForJudge = samples.map((s) => ({ input: s.input, expectedOutput: s.expectedOutput }));
+
+    try {
+        const outputs = await executeCodeOnJudge0(code, language, tcForJudge);
+        const dec = (b) => (b ? Buffer.from(b, "base64").toString("utf-8") : "");
+        const cases = samples.map((s, i) => {
+            const o = outputs[i] || {};
+            return {
+                id: s.id,
+                input: s.input,
+                expectedOutput: s.expectedOutput,
+                stdout: dec(o.stdout).trimEnd(),
+                stderr: dec(o.stderr).trimEnd(),
+                compileOutput: dec(o.compile_output).trimEnd(),
+                status: o.status?.description || "Executed",
+                passed: o.status_id === 3,
+                runtimeMs: o.time ? Math.round(parseFloat(o.time) * 1000) : null,
+                memoryKb: o.memory || null,
+            };
+        });
+        return {
+            sandboxAvailable: true,
+            ran: true,
+            passed: cases.filter((c) => c.passed).length,
+            total: cases.length,
+            cases,
+        };
+    } catch (err) {
+        if (err.isSandboxUnavailable) {
+            return {
+                sandboxAvailable: false,
+                ran: false,
+                message: "The code sandbox is temporarily unavailable. You can still Submit — your solution will be evaluated on code inspection.",
+                cases: samples.map((s) => ({ id: s.id, input: s.input, expectedOutput: s.expectedOutput, passed: null, status: "Not run" })),
+            };
+        }
+        throw err;
+    }
+};
+
+
 // Shared evaluation for the coding + technical rounds. Runs the candidate's code
 // against the hidden test cases on Judge0 and grades it with Gemini. When the
 // sandbox is unavailable it degrades to code-inspection grading so the round
@@ -153,6 +291,11 @@ const evaluateCodeSubmission = async ({ roundDoc, questionId, code, language, gr
 
 // Per-round raw scores use different scales (aptitude/coding sum 0-10 per
 // question; hr is already 0-100). Normalise every round to a 0-100 percentage.
+//
+// The denominator is the number of questions the round was *meant* to have, not
+// just the number served — otherwise a candidate who answers 1 of 45 aptitude
+// questions and gets it right scores 100%.
+const EXPECTED_QUESTIONS = { coding: 10, technical: 1 };
 const normalizeRoundScore = (round) => {
     const qs = round.questionsEvaluations || [];
     const raw = round.roundScore || 0;
@@ -163,7 +306,10 @@ const normalizeRoundScore = (round) => {
     // aptitude / coding / technical: raw is the sum of per-question scores (0-10).
     const answered = qs.filter((q) => q.isAttempted).length;
     const served = qs.length;
-    const denom = Math.max(served, answered, 1) * 10;
+    const expected = round.roundType === 'aptitude'
+        ? (round.aptitudeTotalQuestions || Math.max(served, answered, 15))
+        : (EXPECTED_QUESTIONS[round.roundType] || Math.max(served, answered, 1));
+    const denom = Math.max(expected, served, answered, 1) * 10;
     return Math.max(0, Math.min(100, Math.round((raw / denom) * 100)));
 };
 
@@ -211,6 +357,8 @@ const compileProctorRiskReport = async (sessionDoc) => {
     const pattern = cumulative >= 100 ? 'disqualifying'
         : cumulative >= 60 ? 'highly_suspicious'
             : cumulative >= 25 ? 'suspicious' : 'normal';
+    // The `riskLevel` pre-save hook doesn't run on an upsert, so derive it here.
+    const riskLevel = cumulative >= 80 ? 'critical' : cumulative >= 50 ? 'high' : cumulative >= 25 ? 'medium' : 'low';
 
     try {
         await ProctorRiskReport.findOneAndUpdate(
@@ -222,6 +370,7 @@ const compileProctorRiskReport = async (sessionDoc) => {
                     organization: sessionDoc.organization || null,
                     candidateId: String(live.candidateId || sessionDoc.student),
                     cumulativeRiskScore: cumulative,
+                    riskLevel,
                     isDisqualified: Boolean(live.isDisqualified) || cumulative >= 100,
                     disqualificationReason: (live.isDisqualified || cumulative >= 100)
                         ? 'Proctoring risk threshold exceeded' : '',
@@ -271,16 +420,23 @@ const finalizeInterviewSessionLogic = async (sessionId) => {
     const completeRounds = await RoundDetail.find({ session: sessionId }).lean();
     const reportCard = await compileFinalReportCard(sessionDoc, completeRounds);
 
-    const insightDoc = new PerformanceInsight({
-        session: sessionId,
-        student: sessionDoc.student,
-        narrativeSummary: reportCard.narrativeSummary,
-        strengths: reportCard.strengths,
-        weaknesses: reportCard.weaknesses,
-        skillGapsVsJd: reportCard.skillGapsVsJd,
-        actionableStudyPlan: reportCard.actionableStudyPlan
-    });
-    await insightDoc.save();
+    // Idempotent: finalize can be reached from the client "end", the /terminate
+    // route and the timeout cron — a plain insert would E11000 on the unique
+    // `session` index the second time.
+    await PerformanceInsight.findOneAndUpdate(
+        { session: sessionId },
+        {
+            $set: {
+                student: sessionDoc.student,
+                narrativeSummary: reportCard.narrativeSummary,
+                strengths: reportCard.strengths,
+                weaknesses: reportCard.weaknesses,
+                skillGapsVsJd: reportCard.skillGapsVsJd,
+                actionableStudyPlan: reportCard.actionableStudyPlan,
+            },
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
 
     // ── Normalised, weighted composite score ──────────────────────────────
     const perRound = {};
@@ -340,28 +496,43 @@ const finalizeInterviewSessionLogic = async (sessionId) => {
         coding: perRound.coding ?? 0,
     };
 
-    const analytics = new InterviewAnalytics({
-        session: sessionId,
-        student: sessionDoc.student,
-        campaign: sessionDoc.campaign,
-        organization: sessionDoc.organization,
-        startedAt: sessionDoc.startedAt,
-        completedAt: new Date(),
-        roundAnalytics: roundAnalytics,
-        overallScore: composite,
-        finalGrade: finalGrade,
-        proctoringRiskScore: proctor.cumulativeRiskScore,
-        isDisqualified: proctor.isDisqualified,
-        skillScores,
-        performanceTrend: roundAnalytics.map(r => ({ score: r.totalScore, roundType: r.roundType })),
-        metadata: {
-            targetRole: sessionDoc.targetRole,
-            preferredCodingLanguage: sessionDoc.preferredCodingLanguage,
-            jobDescription: sessionDoc.jobDescription?.title || sessionDoc.targetRole || ''
-        }
-    });
+    await InterviewAnalytics.findOneAndUpdate(
+        { session: sessionId },
+        {
+            $set: {
+                student: sessionDoc.student,
+                campaign: sessionDoc.campaign,
+                organization: sessionDoc.organization,
+                startedAt: sessionDoc.startedAt,
+                completedAt: new Date(),
+                roundAnalytics: roundAnalytics,
+                overallScore: composite,
+                finalGrade: finalGrade,
+                proctoringRiskScore: proctor.cumulativeRiskScore,
+                isDisqualified: proctor.isDisqualified,
+                skillScores,
+                performanceTrend: roundAnalytics.map(r => ({ score: r.totalScore, roundType: r.roundType })),
+                metadata: {
+                    targetRole: sessionDoc.targetRole,
+                    preferredCodingLanguage: sessionDoc.preferredCodingLanguage,
+                    jobDescription: sessionDoc.jobDescription?.title || sessionDoc.targetRole || ''
+                }
+            }
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
 
-    await analytics.save();
+    // Recompute the student's placement-readiness score + competency breakdown
+    // from real interview data. This is the only place it runs on the student
+    // flow — without it the dashboard shows stale/zero competency numbers.
+    try {
+        const PlacementScoreEngine = require('../services/placementScoreEngine.js');
+        await PlacementScoreEngine.updateStudentReadinessScore(
+            String(sessionDoc.student), sessionDoc.organization || null, 'system', 'Auto-updated after interview completion'
+        );
+    } catch (scoreErr) {
+        logger.error('readiness recompute failed', { session: String(sessionDoc._id), error: scoreErr.message });
+    }
 
     try {
         await NotificationService.dispatch({
@@ -370,7 +541,7 @@ const finalizeInterviewSessionLogic = async (sessionId) => {
             type: 'result_available',
             title: 'Interview Report Ready',
             message: `Your interview report is now available. Your score: ${sessionDoc.finalCompositeScore}/100`,
-            actionUrl: '/student/interviews',
+            actionUrl: '/progress',
             actionText: 'View Report',
             priority: 'high',
             metadata: { sessionId: sessionDoc._id, score: sessionDoc.finalCompositeScore }
@@ -590,6 +761,51 @@ const extractProviderSessionId = (data = {}) =>
     );
 
 // Initializing Aptitude Session for API to get its session Id
+// The aptitude micro-service only accepts these exact topic names. The client
+// sends short slugs — map them here so a UI label change never breaks the round.
+const APTITUDE_TOPIC_MAP = {
+    quantitative: "Quantitative Ability",
+    "quantitative-aptitude": "Quantitative Ability",
+    quant: "Quantitative Ability",
+    logical: "Logical Reasoning",
+    "logical-reasoning": "Logical Reasoning",
+    reasoning: "Logical Reasoning",
+    verbal: "English",
+    "verbal-ability": "English",
+    english: "English",
+    "data-interpretation": "Data Interpretation",
+    di: "Data Interpretation",
+    "cs-fundamentals": "Computer Knowledge",
+    "computer-knowledge": "Computer Knowledge",
+    "computer-science": "Computer Knowledge",
+};
+const APTITUDE_VALID_TOPICS = new Set(Object.values(APTITUDE_TOPIC_MAP));
+
+const resolveAptitudeTopics = (raw) => {
+    const list = Array.isArray(raw) ? raw : [raw].filter(Boolean);
+    const mapped = list
+        .map((t) => {
+            const key = String(t || "").trim().toLowerCase();
+            return APTITUDE_TOPIC_MAP[key] || (APTITUDE_VALID_TOPICS.has(String(t).trim()) ? String(t).trim() : null);
+        })
+        .filter(Boolean);
+    // de-dupe, keep order
+    return [...new Set(mapped)];
+};
+
+// The service wants a JobDescription *object*, not a raw string.
+const buildAptitudeJd = (sessionDoc, profile) => {
+    const skills = Array.isArray(profile?.skills)
+        ? profile.skills.map((s) => String(s)).filter(Boolean).slice(0, 30)
+        : [];
+    return {
+        title: String(sessionDoc?.targetRole || "").slice(0, 200),
+        description: String(sessionDoc?.jobDescription || "").slice(0, 8000),
+        requiredSkills: skills,
+        techStack: skills,
+    };
+};
+
 const initializeAptitudeBatchSession = async (req, res) => {
     try {
         const { topics } = req.body;
@@ -612,27 +828,63 @@ const initializeAptitudeBatchSession = async (req, res) => {
             });
         }
 
+        const canonicalTopics = resolveAptitudeTopics(topics);
+        if (canonicalTopics.length === 0) {
+            return res.status(400).json({
+                success: false,
+                code: "INVALID_APTITUDE_TOPICS",
+                message: "Pick at least one valid aptitude topic to begin.",
+            });
+        }
+
+        const profile = await StudentProfile.findOne({ user: userId }).select("skills").lean();
+
         const url = process.env.INITIALIZE_APTITUDE_ROUND_URL;
         const bodyData = {
-            candidateId: userId,
-            topics,
-            jobDescription: sessionDoc?.jobDescription,
+            candidateId: String(userId),
+            topics: canonicalTopics,
+            jobDescription: buildAptitudeJd(sessionDoc, profile),
             questions_per_topic: 15,
         };
-        const config = { headers: { 'aptitude_api_key': `${process.env.APTITUDE_API_KEY}` } };
+        const config = {
+            headers: { aptitude_api_key: `${process.env.APTITUDE_API_KEY}` },
+            timeout: 120000, // the service is a cold-start-prone Render deploy
+        };
 
-        const response = await axios.post(url, bodyData, config);
+        let response;
+        try {
+            response = await axios.post(url, bodyData, config);
+        } catch (apiErr) {
+            const status = apiErr.response?.status;
+            const detail = apiErr.response?.data?.detail;
+            logger.error("aptitude start-session failed", {
+                status,
+                detail: typeof detail === "string" ? detail : JSON.stringify(detail),
+                code: apiErr.code,
+            });
+            if (status === 400 && typeof detail === "string" && /unknown topic/i.test(detail)) {
+                return res.status(422).json({ success: false, code: "INVALID_APTITUDE_TOPICS", message: "One of the selected topics isn't available right now. Try a different combination." });
+            }
+            if (apiErr.code === "ECONNABORTED" || /timeout/i.test(apiErr.message || "")) {
+                return res.status(504).json({ success: false, code: "APTITUDE_TIMEOUT", message: "The aptitude service is waking up. Please try again in a moment." });
+            }
+            return res.status(502).json({ success: false, code: "APTITUDE_UNAVAILABLE", message: "Couldn't reach the aptitude service. Please try again shortly." });
+        }
+
         const providerSessionId = extractProviderSessionId(response?.data || {});
+        if (!providerSessionId) {
+            logger.error("aptitude start-session returned no sessionId", { data: JSON.stringify(response?.data).slice(0, 500) });
+            return res.status(502).json({ success: false, code: "APTITUDE_NO_SESSION", message: "The aptitude service did not return a session. Please try again." });
+        }
 
-        const topicsCount = Array.isArray(topics) ? topics.length : (topics ? 1 : 0);
-        const durationSeconds = computeRoundDurationSeconds("aptitude", { topicsCount });
+        const durationSeconds = computeRoundDurationSeconds("aptitude", { topicsCount: canonicalTopics.length });
         const endsAt = await startRoundTimer(sessionId, "aptitude", durationSeconds);
 
         // Persist the provider session id + selected topics on our RoundDetail
         // so a refresh can resume without a new external batch.
         await RoundDetail.updateOne(
             { session: sessionId, roundType: "aptitude" },
-            { $set: { providerSessionId, aptitudeTopics: Array.isArray(topics) ? topics : [topics].filter(Boolean), status: "active" } },
+            { $set: { providerSessionId, aptitudeTopics: canonicalTopics, status: "active" } },
             { upsert: true }
         );
 
@@ -643,6 +895,7 @@ const initializeAptitudeBatchSession = async (req, res) => {
             message: "Aptitude round initialized successfully",
             endsAt: endsAt || (round?.endsAt ? new Date(round.endsAt).getTime() : null),
             durationSeconds: round?.durationSeconds || durationSeconds,
+            topics: canonicalTopics,
             data: response?.data,
         });
 
@@ -686,50 +939,97 @@ const getAptitudeRoundQuestion = async (req, res) => {
         const config = {
             headers: {
                 'aptitude_api_key': `${process.env.APTITUDE_API_KEY}`
-            }
+            },
+            timeout: 120000,
         }
 
-        const response = await axios.post(url, bodyData, config);
+        let response;
+        try {
+            response = await axios.post(url, bodyData, config);
+        } catch (apiErr) {
+            logger.error("aptitude fetch-questions failed", {
+                status: apiErr.response?.status,
+                detail: JSON.stringify(apiErr.response?.data).slice(0, 400),
+                code: apiErr.code,
+            });
+            if (apiErr.code === "ECONNABORTED" || /timeout/i.test(apiErr.message || "")) {
+                return res.status(504).json({ success: false, code: "APTITUDE_TIMEOUT", message: "The aptitude service is taking longer than usual. Please try again." });
+            }
+            return res.status(502).json({ success: false, code: "APTITUDE_UNAVAILABLE", message: "Couldn't fetch the next question. Please try again shortly." });
+        }
 
-        const questionObj = response?.data?.results[0];
+        const results = Array.isArray(response?.data?.results) ? response.data.results : [];
+        const questionObj = results[0];
+        const pagination = response?.data?.pagination || {};
+
+        // The candidate has finished every generated question for this batch.
+        if (!questionObj || !questionObj.question_id) {
+            return res.status(200).json({
+                success: true,
+                message: "No further aptitude questions.",
+                exhausted: true,
+                question: null,
+                totalItems: pagination.total_items ?? null,
+            });
+        }
+
+        const qid = String(questionObj.question_id);
 
         const answersCollection = await getMongoAptitudeAnswersCollection();
-        const answerDoc = await answersCollection.findOne({ question_id: questionObj?.question_id });
+        const answerDoc = await answersCollection.findOne({
+            question_id: { $in: [questionObj.question_id, qid, Number(qid)] },
+        });
 
+        const normalizeLevel = (lvl) => {
+            const s = String(lvl || "").trim().toLowerCase();
+            if (s === "easy") return "Easy";
+            if (s === "hard") return "Hard";
+            return "Medium";
+        };
+
+        const totalItems = Number(pagination.total_items) || 0;
 
         const questionDetail = {
-            questionId: questionObj?.question_id,
-            questionText: questionObj?.question,
-            difficultyTag: questionObj?.level,
-            idealAnswer: answerDoc?.correct_answer,
-            explanation: answerDoc?.explanation,
+            questionId: qid,
+            questionText: String(questionObj.question || "Question unavailable"),
+            difficultyTag: normalizeLevel(questionObj.level),
+            idealAnswer: answerDoc?.correct_answer ?? "",
+            explanation: answerDoc?.explanation ?? "",
             studentAnswer: "",
-            topic: questionObj?.topic,
-            sub_topic: questionObj?.sub_topic,
-            options: questionObj?.options,
-        }
-
+            topic: questionObj.topic || "",
+            sub_topic: questionObj.sub_topic || "",
+            options: Array.isArray(questionObj.options) ? questionObj.options : [],
+            aptitudePage: page,
+        };
 
         if (!roundDoc) {
-            const newRoundDoc = new RoundDetail({
+            await RoundDetail.create({
                 session: sessionId,
                 roundType: "aptitude",
                 status: "active",
-                questionsEvaluations: [questionDetail]
+                aptitudeTotalQuestions: totalItems,
+                questionsEvaluations: [questionDetail],
             });
-
-            await newRoundDoc.save();
         } else {
-            const alreadyExists = roundDoc.questionsEvaluations.some(q => q.questionId === questionObj.question_id);
-            if (!alreadyExists) {
+            const existing = roundDoc.questionsEvaluations.find((q) => String(q.questionId) === qid);
+            if (!existing) {
                 roundDoc.questionsEvaluations.push(questionDetail);
-                roundDoc.status = "active";
-                await roundDoc.save();
+            } else if (!existing.aptitudePage) {
+                existing.aptitudePage = page;
             }
+            roundDoc.status = "active";
+            if (totalItems && !roundDoc.aptitudeTotalQuestions) roundDoc.aptitudeTotalQuestions = totalItems;
+            await roundDoc.save();
         }
 
-
-        return res.status(200).json({ success: true, message: "Aptitude Round Question Fetched Successfully.", question: questionObj });
+        return res.status(200).json({
+            success: true,
+            message: "Aptitude Round Question Fetched Successfully.",
+            question: questionObj,
+            page: pagination.page ?? page,
+            totalItems: totalItems || (pagination.total_items ?? null),
+            totalPages: pagination.total_pages ?? null,
+        });
 
     } catch (err) {
         logger.error({ message: err.message, stack: err.stack });
@@ -737,6 +1037,44 @@ const getAptitudeRoundQuestion = async (req, res) => {
     }
 }
 
+
+
+// Palette-restore for the aptitude question navigator — which pages are already
+// answered, what was picked, and the batch size. Used on refresh / resume.
+const getAptitudeProgress = async (req, res) => {
+    try {
+        const { sessionId } = req.params;
+        const roundDoc = await RoundDetail.findOne(
+            { session: sessionId, roundType: "aptitude" },
+            "questionsEvaluations aptitudeTotalQuestions aptitudeTopics status endsAt durationSeconds"
+        ).lean();
+
+        if (!roundDoc) {
+            return res.status(200).json({ success: true, total: 0, status: "pending", answered: [] });
+        }
+
+        const answered = (roundDoc.questionsEvaluations || []).map((q) => ({
+            questionId: String(q.questionId),
+            page: q.aptitudePage || null,
+            studentAnswer: q.studentAnswer || "",
+            isAttempted: Boolean(q.isAttempted),
+            topic: q.topic || "",
+        }));
+
+        return res.status(200).json({
+            success: true,
+            total: roundDoc.aptitudeTotalQuestions || 0,
+            topics: roundDoc.aptitudeTopics || [],
+            status: roundDoc.status,
+            endsAt: roundDoc.endsAt ? new Date(roundDoc.endsAt).getTime() : null,
+            durationSeconds: roundDoc.durationSeconds || null,
+            answered,
+        });
+    } catch (err) {
+        logger.error({ message: err.message, stack: err.stack });
+        return sendError(res, err);
+    }
+};
 
 
 const submitAptitudeRound = async (req, res) => {
@@ -754,10 +1092,10 @@ const submitAptitudeRound = async (req, res) => {
         }
 
         const targetQuestion = roundDoc.questionsEvaluations.find(q => (
-            q.questionId === questionId
+            String(q.questionId) === String(questionId)
         ));
         if (!targetQuestion) {
-            return res.status(404).json({ message: "Target question structure node index corrupted." })
+            return res.status(404).json({ message: "That question is not part of this round." })
         }
 
         const aiGrading = await analyzeAptitudeResponse({
@@ -920,12 +1258,17 @@ const getCodingRoundQuestions = async (req, res) => {
         const endsAt = await startRoundTimer(sessionId, "coding", durationSeconds);
         const activeRound = await RoundDetail.findOne({ session: sessionId, roundType: "coding" }, "endsAt durationSeconds").lean();
 
+        const sampleTestCases = await fetchPublicTestCases(question.questionId);
+        const normalized = normalizeCodingQuestion(question, sampleTestCases);
+
         return res.status(200).json({
             success: true,
             message: "Coding Round Question Fetched Successfully.",
             endsAt: endsAt || (activeRound?.endsAt ? new Date(activeRound.endsAt).getTime() : null),
             durationSeconds: activeRound?.durationSeconds || durationSeconds,
-            question: response.data,
+            page,
+            totalProblems: 10,
+            question: normalized,
         });
 
     } catch (err) {
@@ -951,6 +1294,32 @@ const submitCodingRound = async (req, res) => {
         if (error) return res.status(error.status).json({ success: false, message: error.message });
 
         return res.status(200).json(result);
+    } catch (err) {
+        logger.error({ message: err.message, stack: err.stack });
+        return sendError(res, err);
+    }
+}
+
+
+// "Run" — execute against visible sample cases only. Works for both the coding
+// and technical rounds. Never persists, never AI-grades.
+const runCodingRound = async (req, res) => {
+    try {
+        const { sessionId } = req.params;
+        const { questionId, code, language } = req.body;
+
+        // The questionId must belong to a round of this (already ownership-checked) session.
+        const round = await RoundDetail.findOne({
+            session: sessionId,
+            roundType: { $in: ["coding", "technical"] },
+            "questionsEvaluations.questionId": questionId,
+        }).select("_id").lean();
+        if (!round) {
+            return res.status(404).json({ success: false, message: "That question is not part of this interview." });
+        }
+
+        const out = await runCodeAgainstSamples({ questionId, code, language });
+        return res.status(200).json({ success: true, ...out });
     } catch (err) {
         logger.error({ message: err.message, stack: err.stack });
         return sendError(res, err);
@@ -1114,7 +1483,10 @@ const getTechnicalRoundQuestion = async (req, res) => {
             await roundDoc.save();
         }
 
-        return res.status(200).json({ success: true, message: "Technical Round Question Fetched Successfully.", question: response.data });
+        const sampleTestCases = await fetchPublicTestCases(question.questionId);
+        const normalized = normalizeCodingQuestion(question, sampleTestCases);
+
+        return res.status(200).json({ success: true, message: "Technical Round Question Fetched Successfully.", question: normalized });
 
 
     } catch (err) {
@@ -1177,4 +1549,4 @@ const startHrRoundSession = async (req, res) => {
 
 
 
-module.exports = { startInterviewSession, endInterviewSession, getInterviewState, finalizeInterviewSessionLogic, initializeAptitudeBatchSession, getAptitudeRoundQuestion, submitAptitudeRound, getCodingRoundQuestions, submitCodingRound, startTechnicalRoundSession, getTechnicalRoundQuestion, submitTechnicalRound, startHrRoundSession };
+module.exports = { startInterviewSession, endInterviewSession, getInterviewState, finalizeInterviewSessionLogic, initializeAptitudeBatchSession, getAptitudeRoundQuestion, getAptitudeProgress, submitAptitudeRound, getCodingRoundQuestions, submitCodingRound, runCodingRound, startTechnicalRoundSession, getTechnicalRoundQuestion, submitTechnicalRound, startHrRoundSession };

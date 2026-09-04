@@ -1,5 +1,6 @@
 const User = require('../models/userModel.js');
 const StudentProfile = require('../models/StudentProfileModel.js');
+const { normalizeExternalMetrics } = require('../utils/codingProfiles.js');
 const InterviewSession = require('../models/InterviewSessionModel.js');
 const PerformanceInsight = require('../models/PerformanceInsightModel.js');
 const PlacementBatch = require('../models/PlacementBatchModel.js');
@@ -63,13 +64,18 @@ const getStudentBatch = async (studentId, organizationName) => {
     .populate('campaignAssignments.campaign', 'title deadline isActive config assignmentMode targetDepartment targetBatch');
 };
 
-const getPlatformBreakdown = (codingProfiles = {}) => {
-  return Object.entries(codingProfiles).reduce((accumulator, [platform, profile]) => {
-    if (profile && profile.isVerified) {
-      accumulator.verifiedPlatforms.push(platform);
+// Accepts either a StudentProfile.externalMetrics object, or a legacy
+// { platform: { isVerified } } map — both normalise to the same list.
+const getPlatformBreakdown = (source = {}) => {
+  const normalized = normalizeExternalMetrics(source);
+  const verified = Object.entries(normalized).filter(([, p]) => p.isVerified).map(([k]) => k);
+  // Fallback: legacy shape passed directly.
+  if (verified.length === 0) {
+    for (const [platform, p] of Object.entries(source)) {
+      if (p && typeof p === 'object' && p.isVerified) verified.push(platform);
     }
-    return accumulator;
-  }, { verifiedPlatforms: [] });
+  }
+  return { verifiedPlatforms: [...new Set(verified)] };
 };
 
 const buildBatchStudentFilters = (query = {}) => {
@@ -284,13 +290,18 @@ const buildDashboardReport = (report) => {
       trendGranularity: report.metrics?.trendGranularity || 'monthly',
       entity: {
         organization: report.organization,
-        summary: report.summary || {
+        // Always expose the headline metrics the officer dashboard renders,
+        // then layer on the derived summary (topBatch / topPerformer / …).
+        summary: {
           activeStudents: report.metrics.activeStudents,
           activeBatches: report.metrics.activeBatches,
           totalBatches: report.metrics.totalBatches,
+          totalSessions: report.metrics.totalSessions,
           averageReadinessScore: report.metrics.averageReadinessScore,
           averageInterviewScore: report.metrics.averageInterviewScore,
-          averageRiskScore: report.metrics.averageRiskScore
+          averageRiskScore: report.metrics.averageRiskScore,
+          atRiskStudentsCount: report.metrics.atRiskStudentsCount,
+          ...(report.summary || {})
         }
       }
     };
@@ -364,7 +375,7 @@ const buildStudentReport = async ({ studentId, organizationName, query = {} }) =
 
   const sessionMetrics = computeSessionMetrics(sessions);
   const trendSeries = buildTrendSeries(sessions, granularity);
-  const platformBreakdown = getPlatformBreakdown(student.codingProfiles || {});
+  const platformBreakdown = getPlatformBreakdown(profile?.externalMetrics || student.codingProfiles || {});
   const latestInsight = insights[0] || null;
   const recentSessions = sessions.slice(0, 5).map(session => ({
     id: session._id,
@@ -494,7 +505,7 @@ const buildOrganizationReport = async ({ organizationUserId, organizationName, q
       latestScore: metrics.latestScore,
       averageRisk: metrics.averageRisk,
       insightsCount: studentInsights.length,
-      verifiedPlatformCount: getPlatformBreakdown(student.codingProfiles || {}).verifiedPlatforms.length
+      verifiedPlatformCount: getPlatformBreakdown(profile?.externalMetrics || student.codingProfiles || {}).verifiedPlatforms.length
     };
   });
 
@@ -664,7 +675,7 @@ const buildBatchReport = async ({ batchId, organizationUserId, query = {} }) => 
       latestScore: metrics.latestScore,
       averageRisk: metrics.averageRisk,
       insightsCount: studentInsights.length,
-      verifiedPlatformCount: getPlatformBreakdown(student.codingProfiles || {}).verifiedPlatforms.length
+      verifiedPlatformCount: getPlatformBreakdown(studentProfile?.externalMetrics || {}).verifiedPlatforms.length
     };
   });
 

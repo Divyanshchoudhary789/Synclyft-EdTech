@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { superAdminService } from "@synclyft/lib/api/services";
-import { toApiError, api } from "@synclyft/lib/api";
+import { toApiError } from "@synclyft/lib/api";
 import { Badge } from "@synclyft/ui/components/Badge";
+import { Button } from "@synclyft/ui/components/Button";
 import { SkeletonBlock } from "@synclyft/ui/components/SkeletonBlock";
-import { Search, AlertCircle, Building2, X, ShieldCheck, Ban, RotateCcw } from "lucide-react";
+import { PageHeader } from "@/components/PageHeader";
+import { Modal, DetailRow } from "@synclyft/ui/components/Modal";
+import { Search, AlertCircle, Building2, ShieldCheck, Ban, RotateCcw, ExternalLink } from "lucide-react";
 import toast from "react-hot-toast";
 
 interface Org {
@@ -27,34 +30,55 @@ interface Org {
 const STATUS_VARIANT: Record<string, "verdant" | "amber" | "coral" | "neutral"> = {
   active: "verdant", pending_verification: "amber", inactive: "neutral", suspended: "coral",
 };
+const STATUSES = ["", "active", "pending_verification", "inactive", "suspended"];
+const PAGE_SIZE = 30;
 
 export default function OrganizationsPage() {
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
+  const [status, setStatus] = useState("");
+  const [verified, setVerified] = useState("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [detail, setDetail] = useState<Org | null>(null);
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const load = async () => {
+  const load = useCallback(async (opts: { page: number; q: string; status: string; verified: string }) => {
     setLoading(true);
     setError(null);
     try {
-      setOrgs((await superAdminService.organizations({ limit: 100 })) as unknown as Org[]);
+      const res = await superAdminService.organizations({
+        page: opts.page, limit: PAGE_SIZE,
+        search: opts.q || undefined,
+        status: opts.status || undefined,
+        isVerified: opts.verified || undefined,
+      });
+      setOrgs(res.items as unknown as Org[]);
+      setTotal(res.total);
+      setPage(opts.page);
     } catch (err) {
       setError(toApiError(err).message);
     } finally {
       setLoading(false);
     }
-  };
-  useEffect(() => { load(); }, []);
+  }, []);
+
+  useEffect(() => { load({ page: 1, q: "", status: "", verified: "" }); }, [load]);
+  useEffect(() => {
+    if (debounce.current) clearTimeout(debounce.current);
+    debounce.current = setTimeout(() => load({ page: 1, q, status, verified }), 300);
+    return () => { if (debounce.current) clearTimeout(debounce.current); };
+  }, [q, status, verified, load]);
 
   const act = async (id: string, body: Record<string, unknown>, msg: string) => {
     setBusy(id);
     try {
-      await api.patch(`/super-admin/organizations/${id}/status`, body);
+      await superAdminService.updateOrganizationStatus(id, body);
       toast.success(msg);
-      load();
+      load({ page, q, status, verified });
       setDetail(null);
     } catch (err) {
       toast.error(toApiError(err).message);
@@ -63,75 +87,117 @@ export default function OrganizationsPage() {
     }
   };
 
-  const filtered = useMemo(
-    () => orgs.filter((o) => (o.organizationName ?? "").toLowerCase().includes(q.toLowerCase()) || (o.primaryContactPerson?.email ?? "").toLowerCase().includes(q.toLowerCase())),
-    [orgs, q]
-  );
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const selectCls = "px-2 py-1.5 rounded-lg border text-xs";
+  const selectStyle = { backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" };
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>Organizations</h1>
-          <p className="text-xs" style={{ color: "var(--th-text-faint)" }}>{orgs.length} registered institutes</p>
-        </div>
-        <div className="relative">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--th-text-faint)" }} />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…"
-            className="pl-9 pr-3 py-2 rounded-lg border text-xs w-56"
-            style={{ backgroundColor: "var(--th-card-bg)", borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }} />
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Institutions"
+        title="Organizations"
+        subtitle={`${total} registered institutes`}
+        actions={
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            <div className="relative min-w-0 flex-1 sm:w-56 sm:flex-none">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--th-text-faint)" }} />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search institutes…"
+                className="w-full rounded-lg border py-2 pl-9 pr-3 text-xs" style={selectStyle} />
+            </div>
+            <select value={status} onChange={(e) => setStatus(e.target.value)} className={selectCls} style={selectStyle}>
+              {STATUSES.map((s) => <option key={s} value={s}>{s ? s.replace(/_/g, " ") : "All statuses"}</option>)}
+            </select>
+            <select value={verified} onChange={(e) => setVerified(e.target.value)} className={selectCls} style={selectStyle}>
+              <option value="">Any verification</option>
+              <option value="true">Verified</option>
+              <option value="false">Unverified</option>
+            </select>
+          </div>
+        }
+      />
 
       {error && (
         <div className="flex items-center gap-2 rounded-xl border p-4 text-sm" style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-card-bg)", color: "var(--th-text-secondary)" }}>
           <AlertCircle size={16} className="text-amber-500" /> {error}
-          <button onClick={load} className="ml-auto text-blue-600 dark:text-blue-400 text-xs">Retry</button>
+          <button onClick={() => load({ page, q, status, verified })} className="ml-auto text-xs text-blue-600 dark:text-blue-400">Retry</button>
         </div>
       )}
 
-      <div className="rounded-2xl border overflow-hidden" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
-        <div className="grid grid-cols-[2fr_1fr_1.5fr_1.2fr] px-6 py-3 text-[10px] font-bold uppercase tracking-wider border-b" style={{ borderColor: "var(--th-border)", color: "var(--th-text-faint)" }}>
-          <span>Institute</span><span>Type</span><span>Contact</span><span>Status</span>
-        </div>
-        {loading ? (
-          <div className="p-6 space-y-3"><SkeletonBlock height="h-8" /><SkeletonBlock height="h-8" /><SkeletonBlock height="h-8" /></div>
-        ) : filtered.length === 0 ? (
-          <div className="p-12 text-center text-xs" style={{ color: "var(--th-text-faint)" }}>
-            <Building2 size={22} className="mx-auto mb-2 opacity-40" /> No organizations found.
+      <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
+        <div className="min-w-[620px]">
+          <div className="grid grid-cols-[2fr_1fr_1.6fr_1.1fr] border-b px-6 py-3 text-[10px] font-bold uppercase tracking-wider" style={{ borderColor: "var(--th-border)", color: "var(--th-text-faint)" }}>
+            <span>Institute</span><span>Type</span><span>Contact</span><span>Status</span>
           </div>
-        ) : (
-          filtered.map((o) => (
-            <button key={o._id} onClick={() => setDetail(o)}
-              className="w-full grid grid-cols-[2fr_1fr_1.5fr_1.2fr] px-6 py-3.5 items-center border-b last:border-0 text-sm text-left transition-colors hover:bg-black/[0.02] dark:hover:bg-white/[0.02]"
-              style={{ borderColor: "var(--th-border)" }}>
-              <span className="font-medium truncate flex items-center gap-2" style={{ color: "var(--th-text-primary)" }}>
-                {o.organizationName}
-                {o.isVerified && <ShieldCheck size={13} className="text-emerald-500 shrink-0" />}
-              </span>
-              <span className="text-xs" style={{ color: "var(--th-text-secondary)" }}>{o.organizationType ?? "—"}</span>
-              <span className="text-xs truncate" style={{ color: "var(--th-text-muted)" }}>{o.primaryContactPerson?.email ?? o.user?.email ?? "—"}</span>
-              <Badge variant={STATUS_VARIANT[o.status ?? ""] ?? "neutral"}>{o.status ?? "—"}</Badge>
-            </button>
-          ))
-        )}
+          {loading ? (
+            <div className="space-y-3 p-6"><SkeletonBlock height="h-8" /><SkeletonBlock height="h-8" /><SkeletonBlock height="h-8" /></div>
+          ) : orgs.length === 0 ? (
+            <div className="p-12 text-center text-xs" style={{ color: "var(--th-text-faint)" }}>
+              <Building2 size={22} className="mx-auto mb-2 opacity-40" /> No organizations found.
+            </div>
+          ) : (
+            orgs.map((o) => (
+              <button key={o._id} onClick={() => setDetail(o)}
+                className="grid w-full grid-cols-[2fr_1fr_1.6fr_1.1fr] items-center border-b px-6 py-3.5 text-left text-sm transition-colors last:border-0 hover:bg-black/[0.02] dark:hover:bg-white/[0.02]"
+                style={{ borderColor: "var(--th-border)" }}>
+                <span className="flex items-center gap-2 truncate font-medium" style={{ color: "var(--th-text-primary)" }}>
+                  {o.organizationName}
+                  {o.isVerified && <ShieldCheck size={13} className="shrink-0 text-emerald-500" />}
+                </span>
+                <span className="text-xs capitalize" style={{ color: "var(--th-text-secondary)" }}>{o.organizationType?.replace(/_/g, " ") ?? "—"}</span>
+                <span className="truncate text-xs" style={{ color: "var(--th-text-muted)" }}>{o.primaryContactPerson?.email ?? o.user?.email ?? "—"}</span>
+                <Badge variant={STATUS_VARIANT[o.status ?? ""] ?? "neutral"}>{(o.status ?? "—").replace(/_/g, " ")}</Badge>
+              </button>
+            ))
+          )}
+        </div>
       </div>
 
-      {detail && (
-        <div className="fixed inset-0 z-50 flex justify-end">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setDetail(null)} />
-          <div className="relative w-full max-w-md h-full overflow-y-auto shadow-2xl" style={{ backgroundColor: "var(--th-bg)" }}>
-            <div className="sticky top-0 flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-bg)" }}>
-              <h2 className="text-sm font-bold" style={{ color: "var(--th-text-primary)" }}>{detail.organizationName}</h2>
-              <button onClick={() => setDetail(null)} style={{ color: "var(--th-text-faint)" }}><X size={18} /></button>
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between">
+          <Button variant="secondary" disabled={page <= 1 || loading} onClick={() => load({ page: page - 1, q, status, verified })}>Previous</Button>
+          <span className="text-xs" style={{ color: "var(--th-text-faint)" }}>Page {page} of {totalPages}</span>
+          <Button variant="secondary" disabled={page >= totalPages || loading} onClick={() => load({ page: page + 1, q, status, verified })}>Next</Button>
+        </div>
+      )}
+
+      <Modal
+        open={!!detail}
+        onClose={() => setDetail(null)}
+        icon={<div className="rounded-xl bg-blue-500/10 p-2 text-blue-600 dark:text-blue-400"><Building2 size={16} /></div>}
+        title={detail?.organizationName ?? ""}
+        subtitle={detail ? `Registered ${detail.createdAt ? new Date(detail.createdAt).toLocaleDateString("en-IN") : "—"}` : undefined}
+        footer={detail && (
+          <>
+            {!detail.isVerified && (
+              <button disabled={busy === detail._id} onClick={() => act(detail._id, { isVerified: true }, "Organization verified")}
+                className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">
+                <ShieldCheck size={13} /> Verify
+              </button>
+            )}
+            {detail.status !== "suspended" ? (
+              <button disabled={busy === detail._id} onClick={() => act(detail._id, { status: "suspended" }, "Organization suspended")}
+                className="flex items-center gap-1.5 rounded-lg bg-rose-500 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">
+                <Ban size={13} /> Suspend
+              </button>
+            ) : (
+              <button disabled={busy === detail._id} onClick={() => act(detail._id, { status: "active" }, "Organization reactivated")}
+                className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-bold disabled:opacity-50" style={{ borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }}>
+                <RotateCcw size={13} /> Reactivate
+              </button>
+            )}
+          </>
+        )}
+      >
+        {detail && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap gap-2">
+              <Badge variant={STATUS_VARIANT[detail.status ?? ""] ?? "neutral"}>{(detail.status ?? "—").replace(/_/g, " ")}</Badge>
+              <Badge variant={detail.isVerified ? "verdant" : "amber"}>{detail.isVerified ? "Verified" : "Unverified"}</Badge>
             </div>
-            <div className="p-6 space-y-4 text-xs" style={{ color: "var(--th-text-secondary)" }}>
-              <div className="flex flex-wrap gap-2">
-                <Badge variant={STATUS_VARIANT[detail.status ?? ""] ?? "neutral"}>{detail.status ?? "—"}</Badge>
-                <Badge variant={detail.isVerified ? "verdant" : "amber"}>{detail.isVerified ? "Verified" : "Unverified"}</Badge>
-              </div>
+
+            <div className="grid gap-x-6 sm:grid-cols-2">
               {([
-                ["Type", detail.organizationType],
+                ["Type", detail.organizationType?.replace(/_/g, " ")],
                 ["Registration #", detail.registrationNumber],
                 ["Phone", detail.phone],
                 ["Website", detail.website],
@@ -139,48 +205,28 @@ export default function OrganizationsPage() {
                 ["Primary contact", detail.primaryContactPerson?.name],
                 ["Contact email", detail.primaryContactPerson?.email ?? detail.user?.email],
                 ["Designation", detail.primaryContactPerson?.designation],
-                ["Registered", detail.createdAt ? new Date(detail.createdAt).toLocaleDateString("en-IN") : ""],
               ] as const).map(([label, value]) => (
-                <div key={label} className="flex justify-between gap-3">
-                  <span style={{ color: "var(--th-text-faint)" }}>{label}</span>
-                  <span className="text-right truncate max-w-[60%]" style={{ color: "var(--th-text-primary)" }}>{value || "—"}</span>
-                </div>
+                <DetailRow key={label} label={label}>{value || "—"}</DetailRow>
               ))}
+            </div>
 
-              {(detail.verificationDocuments ?? []).length > 0 && (
-                <div>
-                  <p style={{ color: "var(--th-text-faint)" }} className="mb-1">Verification documents</p>
+            {(detail.verificationDocuments ?? []).length > 0 && (
+              <div className="border-t pt-3" style={{ borderColor: "var(--th-border)" }}>
+                <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider" style={{ color: "var(--th-text-faint)" }}>Verification documents</p>
+                <div className="flex flex-wrap gap-2">
                   {detail.verificationDocuments!.map((d, i) => (
-                    <a key={i} href={d.documentUrl} target="_blank" rel="noreferrer" className="block text-blue-600 dark:text-blue-400 hover:underline">
-                      {d.documentType || `Document ${i + 1}`}
+                    <a key={i} href={d.documentUrl} target="_blank" rel="noreferrer"
+                      className="flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs text-blue-600 hover:underline dark:text-blue-400"
+                      style={{ borderColor: "var(--th-border)" }}>
+                      {d.documentType?.replace(/_/g, " ") || `Document ${i + 1}`} <ExternalLink size={11} />
                     </a>
                   ))}
                 </div>
-              )}
-
-              <div className="pt-3 border-t flex flex-wrap gap-2" style={{ borderColor: "var(--th-border)" }}>
-                {!detail.isVerified && (
-                  <button disabled={busy === detail._id} onClick={() => act(detail._id, { isVerified: true }, "Organization verified")}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-500 text-white disabled:opacity-50">
-                    <ShieldCheck size={13} /> Verify
-                  </button>
-                )}
-                {detail.status !== "suspended" ? (
-                  <button disabled={busy === detail._id} onClick={() => act(detail._id, { status: "suspended" }, "Organization suspended")}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-rose-500 text-white disabled:opacity-50">
-                    <Ban size={13} /> Suspend
-                  </button>
-                ) : (
-                  <button disabled={busy === detail._id} onClick={() => act(detail._id, { status: "active" }, "Organization reactivated")}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border disabled:opacity-50" style={{ borderColor: "var(--th-border-strong)", color: "var(--th-text-primary)" }}>
-                    <RotateCcw size={13} /> Reactivate
-                  </button>
-                )}
               </div>
-            </div>
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </Modal>
     </div>
   );
 }

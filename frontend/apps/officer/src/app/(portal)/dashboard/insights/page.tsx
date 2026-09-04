@@ -7,7 +7,8 @@ import { toApiError } from "@synclyft/lib/api";
 import { getGradeBand, getGradeColor } from "@synclyft/lib/utils";
 import { Badge } from "@synclyft/ui/components/Badge";
 import { SkeletonBlock } from "@synclyft/ui/components/SkeletonBlock";
-import { Sparkles, AlertCircle, Trophy, TrendingDown, BookOpen, ArrowDown } from "lucide-react";
+import { Sparkles, AlertCircle, Trophy, TrendingDown, BookOpen, ArrowDown, CalendarX, CheckCircle2, ArrowRight } from "lucide-react";
+import { PageHeader } from "@/components/PageHeader";
 
 interface Candidate {
   id?: string; studentId?: string; name?: string; email?: string; branch?: string;
@@ -28,20 +29,23 @@ export default function OfficerInsightsPage() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [declining, setDeclining] = useState<Declining[]>([]);
   const [workshops, setWorkshops] = useState<Workshop[]>([]);
+  const [missed, setMissed] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const [c, d, w] = await Promise.allSettled([
+      const [c, d, w, m] = await Promise.allSettled([
         collegeAdminService.topCandidates({ limit: 15, minReadinessScore: 55 }),
         collegeAdminService.decliningStudents({ limit: 15 }),
         collegeAdminService.workshopRecommendations(),
+        collegeAdminService.missedAptitude({ limit: 30 }),
       ]);
       if (c.status === "fulfilled") setCandidates(c.value as unknown as Candidate[]);
       if (d.status === "fulfilled") setDeclining(d.value as unknown as Declining[]);
       if (w.status === "fulfilled") setWorkshops(w.value as unknown as Workshop[]);
+      if (m.status === "fulfilled") setMissed(m.value as Record<string, unknown>[]);
       if (c.status === "rejected" && d.status === "rejected") setError(toApiError(c.reason).message);
       setLoading(false);
     })();
@@ -50,13 +54,13 @@ export default function OfficerInsightsPage() {
   const openStudent = (id?: string) => id && router.push(`/dashboard/students?student=${id}`);
 
   return (
-    <div className="p-6 md:p-8 space-y-7">
-      <div>
-        <h1 className="text-lg font-semibold flex items-center gap-2" style={{ fontFamily: "var(--font-inter-tight), sans-serif", color: "var(--th-text-primary)" }}>
-          <Sparkles size={18} className="text-blue-500" /> Placement intelligence
-        </h1>
-        <p className="text-xs" style={{ color: "var(--th-text-faint)" }}>Who to put forward, who needs help, and what to run next quarter</p>
-      </div>
+    <div className="p-5 sm:p-6 md:p-8 space-y-6 sm:space-y-7">
+      <PageHeader
+        eyebrow="Intelligence"
+        icon={<Sparkles size={18} className="text-blue-500" />}
+        title="Placement intelligence"
+        subtitle="Who to put forward, who needs help, and what to run next quarter"
+      />
 
       {error && (
         <div className="flex items-center gap-2 rounded-xl border p-4 text-sm" style={{ borderColor: "var(--th-border)", backgroundColor: "var(--th-card-bg)", color: "var(--th-text-secondary)" }}>
@@ -112,8 +116,8 @@ export default function OfficerInsightsPage() {
               <TrendingDown size={15} className="text-rose-500" /> Students in decline
             </h2>
             {declining.length === 0 ? (
-              <p className="text-xs rounded-xl border p-4" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)", color: "var(--th-text-faint)" }}>
-                No students showing a downward readiness trend. 🎉
+              <p className="text-xs rounded-xl border p-4 flex items-center gap-2" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)", color: "var(--th-text-faint)" }}>
+                <CheckCircle2 size={14} className="text-emerald-500 shrink-0" /> No students showing a downward readiness trend.
               </p>
             ) : (
               <div className="grid gap-3 sm:grid-cols-2">
@@ -127,12 +131,46 @@ export default function OfficerInsightsPage() {
                         <ArrowDown size={11} /> {Math.round(d.scoreDrop ?? 0)}
                       </span>
                     </div>
-                    <p className="text-[10px] mt-0.5" style={{ color: "var(--th-text-faint)" }}>{d.branch} · {Math.round(d.previousScore ?? 0)} → {Math.round(d.currentScore ?? 0)}</p>
+                    <p className="text-[10px] mt-0.5 flex items-center gap-1" style={{ color: "var(--th-text-faint)" }}>
+                      {d.branch} · {Math.round(d.previousScore ?? 0)} <ArrowRight size={9} /> {Math.round(d.currentScore ?? 0)}
+                    </p>
                     {(d.skillGaps ?? []).length > 0 && (
                       <p className="text-[10px] mt-1.5" style={{ color: "var(--th-text-muted)" }}>Gaps: {(d.skillGaps ?? []).slice(0, 4).join(", ")}</p>
                     )}
                   </button>
                 ))}
+              </div>
+            )}
+          </section>
+
+          {/* Students who haven't attempted an aptitude round */}
+          <section className="space-y-3">
+            <h2 className="text-sm font-bold flex items-center gap-2" style={{ color: "var(--th-text-primary)" }}>
+              <CalendarX size={15} className="text-amber-500" /> Yet to attempt aptitude
+            </h2>
+            {missed.length === 0 ? (
+              <p className="text-xs rounded-xl border p-4 flex items-center gap-2" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)", color: "var(--th-text-faint)" }}>
+                <CheckCircle2 size={14} className="text-emerald-500 shrink-0" /> Every student has attempted at least one aptitude round.
+              </p>
+            ) : (
+              <div className="rounded-2xl border overflow-x-auto" style={{ borderColor: "var(--th-card-border)", backgroundColor: "var(--th-card-bg)" }}>
+                <div className="min-w-[420px]">
+                  <div className="grid grid-cols-[2fr_1fr_1fr] px-5 py-2.5 text-[10px] font-bold uppercase border-b" style={{ borderColor: "var(--th-border)", color: "var(--th-text-faint)" }}>
+                    <span>Student</span><span>Branch</span><span>Grad year</span>
+                  </div>
+                  {missed.map((s, i) => (
+                    <button key={String(s.id ?? i)} onClick={() => openStudent(String(s.id ?? ""))}
+                      className="w-full grid grid-cols-[2fr_1fr_1fr] px-5 py-3 items-center border-b last:border-0 text-left text-xs transition-colors hover:bg-black/[0.02] dark:hover:bg-white/[0.02]"
+                      style={{ borderColor: "var(--th-border)" }}>
+                      <div className="min-w-0">
+                        <p className="font-medium truncate" style={{ color: "var(--th-text-primary)" }}>{String(s.name ?? "—")}</p>
+                        <p className="text-[10px] truncate" style={{ color: "var(--th-text-faint)" }}>{String(s.email ?? "")}</p>
+                      </div>
+                      <span style={{ color: "var(--th-text-secondary)" }}>{String(s.branch ?? "—")}</span>
+                      <span style={{ color: "var(--th-text-secondary)" }}>{s.graduationYear ? String(s.graduationYear) : "—"}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </section>
